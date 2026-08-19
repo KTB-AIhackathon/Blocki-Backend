@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:blocki;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+jwt:
+  secret: test-jwt-secret-must-be-at-least-thirty-two-bytes
+  access-token-expiration-seconds: 3600
+
+INTEGRATION_TOKEN_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+notion:
+  client-id: test-notion-client-id
+  client-secret: test-notion-client-secret
+  redirect-uri: https://example.test/api/v1/integrations/notion/callback
+
+github:
+  client-id: test-github-client-id
+  client-secret: test-github-client-secret
+  redirect-uri: https://example.test/api/v1/integrations/github/callback
