@@ -12,6 +12,10 @@ public record ErrorResponse(ErrorBody error) {
 		return of(errorCode, message, null, null);
 	}
 
+	public static ErrorResponse of(String code, String message) {
+		return new ErrorResponse(new ErrorBody(code, message, UUID.randomUUID().toString(), null, null));
+	}
+
 	public static ErrorResponse of(
 			ErrorCode errorCode,
 			String message,
