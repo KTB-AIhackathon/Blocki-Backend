@@ -1,0 +1,25 @@
+# 팀 전체가 동일한 로컬 PostgreSQL 환경을 쓰기 위한 설정입니다.
+# src/main/resources/application.yaml의 기본값(DB_URL/DB_USERNAME/DB_PASSWORD 미설정 시)과
+# 정확히 일치하므로, 이 파일로 DB를 띄우면 별도 환경변수 설정 없이 바로 로컬 실행이 됩니다.
+#
+# 사용법: docker compose up -d
+services:
+  postgres:
+    image: postgres:16
+    container_name: blocki-postgres
+    environment:
+      POSTGRES_DB: blocki
+      POSTGRES_USER: blocki
+      POSTGRES_PASSWORD: blocki
+    ports:
+      - "5432:5432"
+    volumes:
+      - blocki_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blocki -d blocki"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  blocki_pgdata:
