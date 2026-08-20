@@ -194,6 +194,35 @@ class DocumentGenerationClientTest {
 
         assertThat(result.status()).isEqualTo("partial");
         assertThat(result.missingSources()).containsExactly("GITHUB");
+        assertThat(result.retryable()).isFalse();
+    }
+
+    @Test
+    void returns_partial_without_inventing_a_missing_source() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(withSuccess("""
+                        { "ok": true, "status": "partial", "artifact": { "kind": "resume", "title": "이력서", "body_markdown": "# 문서" }, "missing_sources": [] }
+                        """, APPLICATION_JSON));
+
+        DocumentGenerationClient.Result result = client.generate(job());
+
+        assertThat(result.ok()).isTrue();
+        assertThat(result.status()).isEqualTo("partial");
+        assertThat(result.missingSources()).isEmpty();
+    }
+
+    @Test
+    void reads_retryable_from_the_existing_ai_error_object() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(withSuccess("""
+                        { "ok": false, "status": "failed", "error_code": "internal", "error": { "code": "internal", "retryable": true }, "missing_sources": [] }
+                        """, APPLICATION_JSON));
+
+        DocumentGenerationClient.Result result = client.generate(job());
+
+        assertThat(result.ok()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("internal");
+        assertThat(result.retryable()).isTrue();
     }
 
     @Test

@@ -1,6 +1,10 @@
 spring:
   application:
     name: blocki-backend
+  task:
+    scheduling:
+      pool:
+        size: 2
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/blocki}
     username: ${DB_USERNAME:blocki}

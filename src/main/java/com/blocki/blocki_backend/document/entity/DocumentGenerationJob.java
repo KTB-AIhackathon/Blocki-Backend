@@ -156,9 +156,15 @@ public class DocumentGenerationJob {
     }
 
     public void succeed(UUID documentId, UUID versionId, Instant completedAt, String missingSources) {
-        this.status = missingSources == null || missingSources.isBlank()
-                ? DocumentGenerationJobStatus.SUCCEEDED
-                : DocumentGenerationJobStatus.PARTIALLY_SUCCEEDED;
+        succeed(documentId, versionId, completedAt, missingSources, false);
+    }
+
+    public void succeed(
+            UUID documentId, UUID versionId, Instant completedAt, String missingSources, boolean partial) {
+        boolean incomplete = partial || (missingSources != null && !missingSources.isBlank());
+        this.status = incomplete
+                ? DocumentGenerationJobStatus.PARTIALLY_SUCCEEDED
+                : DocumentGenerationJobStatus.SUCCEEDED;
         this.progress = 100;
         this.completedAt = completedAt;
         this.retryable = false;

@@ -40,7 +40,8 @@ class DocumentGenerationWorkerTest {
         worker(jobRepository, claimService, completionService, client).processQueuedJobs();
 
         ArgumentCaptor<GeneratedDocument> generated = ArgumentCaptor.forClass(GeneratedDocument.class);
-        verify(completionService).complete(any(), generated.capture(), org.mockito.ArgumentMatchers.eq("GITHUB"));
+        verify(completionService).complete(
+                any(), generated.capture(), org.mockito.ArgumentMatchers.eq("GITHUB"), org.mockito.ArgumentMatchers.eq(false));
         assertThat(generated.getValue()).isEqualTo(new GeneratedDocument("이력서", "# 내용"));
         assertThat(job.getStatus()).isEqualTo(DocumentGenerationJobStatus.RUNNING);
     }
@@ -80,11 +81,12 @@ class DocumentGenerationWorkerTest {
 
         verify(completionService).complete(any(),
                 org.mockito.ArgumentMatchers.eq(new GeneratedDocument("이력서", "# 새 문서")),
-                org.mockito.ArgumentMatchers.eq(""));
+                org.mockito.ArgumentMatchers.eq(""),
+                org.mockito.ArgumentMatchers.eq(false));
     }
 
     @Test
-    void fails_without_retry_when_ai_returns_http_200_with_ok_false() {
+    void reschedules_http_200_retryable_ai_failure_after_thirty_seconds() {
         DocumentGenerationJobRepository jobRepository = Mockito.mock(DocumentGenerationJobRepository.class);
         DocumentGenerationClaimService claimService = Mockito.mock(DocumentGenerationClaimService.class);
         DocumentGenerationCompletionService completionService = Mockito.mock(DocumentGenerationCompletionService.class);
@@ -93,7 +95,28 @@ class DocumentGenerationWorkerTest {
         job.start(NOW);
         when(claimService.claimDueQueuedJobs(NOW)).thenReturn(List.of(job));
         when(client.generate(any())).thenReturn(new DocumentGenerationClient.Result(
-                false, "failed", null, List.of(), "missing_pat"));
+                false, "failed", null, List.of(), "internal", true));
+
+        worker(jobRepository, claimService, completionService, client).processQueuedJobs();
+
+        assertThat(job.getStatus()).isEqualTo(DocumentGenerationJobStatus.QUEUED);
+        assertThat(job.getAttempt()).isEqualTo(2);
+        assertThat(job.getNextRetryAt()).isEqualTo(NOW.plusSeconds(30));
+        verify(jobRepository).save(job);
+        Mockito.verifyNoInteractions(completionService);
+    }
+
+    @Test
+    void fails_http_200_non_retryable_ai_failure_immediately() {
+        DocumentGenerationJobRepository jobRepository = Mockito.mock(DocumentGenerationJobRepository.class);
+        DocumentGenerationClaimService claimService = Mockito.mock(DocumentGenerationClaimService.class);
+        DocumentGenerationCompletionService completionService = Mockito.mock(DocumentGenerationCompletionService.class);
+        DocumentGenerationClient client = Mockito.mock(DocumentGenerationClient.class);
+        DocumentGenerationJob job = job();
+        job.start(NOW);
+        when(claimService.claimDueQueuedJobs(NOW)).thenReturn(List.of(job));
+        when(client.generate(any())).thenReturn(new DocumentGenerationClient.Result(
+                false, "failed", null, List.of(), "missing_pat", false));
 
         worker(jobRepository, claimService, completionService, client).processQueuedJobs();
 
@@ -101,7 +124,28 @@ class DocumentGenerationWorkerTest {
         assertThat(job.getErrorCode()).isEqualTo("missing_pat");
         assertThat(job.isRetryable()).isFalse();
         verify(jobRepository).save(job);
-        verify(completionService, Mockito.never()).complete(any(), any(), any());
+        Mockito.verifyNoInteractions(completionService);
+    }
+
+    @Test
+    void records_partial_success_with_empty_missing_sources() {
+        DocumentGenerationJobRepository jobRepository = Mockito.mock(DocumentGenerationJobRepository.class);
+        DocumentGenerationClaimService claimService = Mockito.mock(DocumentGenerationClaimService.class);
+        DocumentGenerationCompletionService completionService = Mockito.mock(DocumentGenerationCompletionService.class);
+        DocumentGenerationClient client = Mockito.mock(DocumentGenerationClient.class);
+        DocumentGenerationJob job = job();
+        job.start(NOW);
+        when(claimService.claimDueQueuedJobs(NOW)).thenReturn(List.of(job));
+        when(client.generate(any())).thenReturn(new DocumentGenerationClient.Result(
+                true, "partial", "# 문서", List.of(), null));
+
+        worker(jobRepository, claimService, completionService, client).processQueuedJobs();
+
+        verify(completionService).complete(
+                any(),
+                org.mockito.ArgumentMatchers.eq(new GeneratedDocument("이력서", "# 문서")),
+                org.mockito.ArgumentMatchers.eq(""),
+                org.mockito.ArgumentMatchers.eq(true));
     }
 
     @Test

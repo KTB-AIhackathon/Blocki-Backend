@@ -10,6 +10,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +28,7 @@ public class DocumentGenerationAutomationScheduler {
     private final DocumentGenerationAutomationService automationService;
     private final DocumentGenerationService documentGenerationService;
     private final Clock clock;
+    private LocalDateTime lastEvaluatedMinute;
 
     @Autowired
     public DocumentGenerationAutomationScheduler(
@@ -45,9 +48,30 @@ public class DocumentGenerationAutomationScheduler {
 
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Seoul")
     public void runWeeklyDocumentGeneration() {
-        LocalDateTime scheduledAt = LocalDateTime.now(clock.withZone(SCHEDULE_ZONE))
+        LocalDateTime current = LocalDateTime.now(clock.withZone(SCHEDULE_ZONE))
                 .withSecond(0)
                 .withNano(0);
+        for (LocalDateTime scheduledAt : minutesToEvaluate(current)) {
+            dispatch(scheduledAt);
+        }
+        lastEvaluatedMinute = current;
+    }
+
+    List<LocalDateTime> minutesToEvaluate(LocalDateTime current) {
+        if (lastEvaluatedMinute == null) {
+            return List.of(current);
+        }
+        if (!lastEvaluatedMinute.isBefore(current)) {
+            return List.of();
+        }
+        List<LocalDateTime> minutes = new ArrayList<>();
+        for (LocalDateTime cursor = lastEvaluatedMinute.plusMinutes(1); !cursor.isAfter(current); cursor = cursor.plusMinutes(1)) {
+            minutes.add(cursor);
+        }
+        return minutes;
+    }
+
+    private void dispatch(LocalDateTime scheduledAt) {
         LocalDate scheduledDate = scheduledAt.toLocalDate();
         var userIds = automationService.findEnabledUserIds(
                 scheduledAt.getDayOfWeek(), scheduledAt.toLocalTime());

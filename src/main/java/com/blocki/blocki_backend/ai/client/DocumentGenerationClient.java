@@ -109,7 +109,13 @@ public class DocumentGenerationClient {
             if (!"failed".equals(response.status()) || isBlank(response.errorCode())) {
                 throw new IllegalArgumentException("AI failure response is invalid");
             }
-            return new Result(false, response.status(), null, missingSources, response.errorCode());
+            return new Result(
+                    false,
+                    response.status(),
+                    null,
+                    missingSources,
+                    response.errorCode(),
+                    response.error() != null && Boolean.TRUE.equals(response.error().retryable()));
         }
         if (!Set.of("proposed", "partial", "no_change").contains(response.status())
                 || response.artifact() == null
@@ -118,7 +124,7 @@ public class DocumentGenerationClient {
                 || isBlank(response.artifact().bodyMarkdown())) {
             throw new IllegalArgumentException("AI success response is invalid");
         }
-        return new Result(true, response.status(), response.artifact().bodyMarkdown(), missingSources, null);
+        return new Result(true, response.status(), response.artifact().bodyMarkdown(), missingSources, null, false);
     }
 
     private static boolean isBlank(String value) {
@@ -159,7 +165,14 @@ public class DocumentGenerationClient {
             @JsonProperty("status") String status,
             @JsonProperty("artifact") InternalArtifact artifact,
             @JsonProperty("missing_sources") List<String> missingSources,
-            @JsonProperty("error_code") String errorCode) {
+            @JsonProperty("error_code") String errorCode,
+            @JsonProperty("error") InternalError error) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record InternalError(
+            @JsonProperty("code") String code,
+            @JsonProperty("retryable") Boolean retryable) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -169,6 +182,15 @@ public class DocumentGenerationClient {
             @JsonProperty("body_markdown") String bodyMarkdown) {
     }
 
-    public record Result(boolean ok, String status, String markdown, List<String> missingSources, String errorCode) {
+    public record Result(
+            boolean ok,
+            String status,
+            String markdown,
+            List<String> missingSources,
+            String errorCode,
+            boolean retryable) {
+        public Result(boolean ok, String status, String markdown, List<String> missingSources, String errorCode) {
+            this(ok, status, markdown, missingSources, errorCode, false);
+        }
     }
 }

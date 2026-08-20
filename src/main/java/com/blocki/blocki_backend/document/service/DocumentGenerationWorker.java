@@ -66,20 +66,26 @@ public class DocumentGenerationWorker {
             DocumentGenerationClient.Result result = client.generate(job);
             int markdownChars = result.markdown() == null ? 0 : result.markdown().length();
             if (!result.ok() || result.markdown() == null || result.markdown().isBlank()) {
+                String errorCode = result.errorCode() == null ? "AI_PIPELINE_FAILED" : result.errorCode();
                 log.warn(
-                        "document job failed uuid={} ts={} userId={} type={} httpBodyOk={} status={} errorCode={} markdownChars={} attempt={}/{} ms={}",
+                        "document job failed uuid={} ts={} userId={} type={} httpBodyOk={} status={} errorCode={} retryable={} markdownChars={} attempt={}/{} ms={}",
                         job.getId(),
                         clock.instant(),
                         job.getUserId(),
                         job.getDocumentType(),
                         result.ok(),
                         result.status(),
-                        result.errorCode(),
+                        errorCode,
+                        result.retryable(),
                         markdownChars,
                         job.getAttempt(),
                         job.getMaxAttempts(),
                         elapsedMs(started));
-                fail(job, result.errorCode() == null ? "AI_PIPELINE_FAILED" : result.errorCode(), false);
+                if (result.retryable()) {
+                    retryOrFail(job, errorCode);
+                } else {
+                    fail(job, errorCode, false);
+                }
                 return;
             }
             String missingSources = String.join(",", result.missingSources());
@@ -95,7 +101,11 @@ public class DocumentGenerationWorker {
                     job.getAttempt(),
                     job.getMaxAttempts(),
                     elapsedMs(started));
-            completionService.complete(job, new GeneratedDocument(title(job), result.markdown()), missingSources);
+            completionService.complete(
+                    job,
+                    new GeneratedDocument(title(job), result.markdown()),
+                    missingSources,
+                    "partial".equals(result.status()));
         } catch (InternalAiClientException exception) {
             log.warn(
                     "document job transport uuid={} ts={} userId={} type={} category={} retryable={} attempt={}/{} ms={} cause={}",

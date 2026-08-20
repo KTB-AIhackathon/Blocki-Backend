@@ -26,6 +26,11 @@ public class DocumentGenerationCompletionService {
 
     @Transactional
     public void complete(DocumentGenerationJob job, GeneratedDocument generated, String missingSources) {
+        complete(job, generated, missingSources, false);
+    }
+
+    public void complete(
+            DocumentGenerationJob job, GeneratedDocument generated, String missingSources, boolean partial) {
         validate(generated);
         Instant now = clock.instant();
         Document document = documentRepository.findWithLockByUserIdAndType(job.getUserId(), job.getDocumentType())
@@ -34,7 +39,7 @@ public class DocumentGenerationCompletionService {
                 .map(version -> version.getVersion() + 1)
                 .orElse(1);
         DocumentVersion version = versionRepository.save(DocumentVersion.create(document.getId(), nextVersion, generated.markdown().trim(), now));
-        job.succeed(document.getId(), version.getId(), now, missingSources);
+        job.succeed(document.getId(), version.getId(), now, missingSources, partial);
         jobRepository.save(job);
     }
 

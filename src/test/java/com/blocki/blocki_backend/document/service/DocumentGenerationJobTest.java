@@ -26,4 +26,17 @@ class DocumentGenerationJobTest {
         assertThat(job.getMissingSources()).isEqualTo("GITHUB");
         assertThat(job.isRetryable()).isFalse();
     }
+
+    @Test
+    void records_partial_success_with_empty_missing_sources() {
+        Instant createdAt = Instant.parse("2026-08-20T00:00:00Z");
+        DocumentGenerationJob job = DocumentGenerationJob.queue(
+                UUID.randomUUID(), DocumentType.PORTFOLIO, "key", createdAt, createdAt.plusSeconds(86_400));
+
+        job.start(createdAt.plusSeconds(1));
+        job.succeed(UUID.randomUUID(), UUID.randomUUID(), createdAt.plusSeconds(35), "", true);
+
+        assertThat(job.getStatus()).isEqualTo(DocumentGenerationJobStatus.PARTIALLY_SUCCEEDED);
+        assertThat(job.getMissingSources()).isEmpty();
+    }
 }

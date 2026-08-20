@@ -13,7 +13,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.data.domain.Pageable;
 
 class DocumentGenerationClaimServiceTest {
 
@@ -64,6 +66,19 @@ class DocumentGenerationClaimServiceTest {
         assertThat(job.getStatus()).isEqualTo(DocumentGenerationJobStatus.RUNNING);
         assertThat(job.getStartedAt()).isEqualTo(NOW);
         verify(repository).findDueQueuedJobs(eq(DocumentGenerationJobStatus.QUEUED), eq(NOW), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void claims_only_one_due_job_per_worker_tick() {
+        DocumentGenerationJobRepository repository = Mockito.mock(DocumentGenerationJobRepository.class);
+        when(repository.findDueQueuedJobs(eq(DocumentGenerationJobStatus.QUEUED), eq(NOW), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of());
+
+        new DocumentGenerationClaimService(repository).claimDueQueuedJobs(NOW);
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(repository).findDueQueuedJobs(eq(DocumentGenerationJobStatus.QUEUED), eq(NOW), pageable.capture());
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(1);
     }
 
     private DocumentGenerationJob job() {

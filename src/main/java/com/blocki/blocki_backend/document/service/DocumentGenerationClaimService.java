@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DocumentGenerationClaimService {
 
-    private static final int CLAIM_BATCH_SIZE = 10;
+    private static final int CLAIM_BATCH_SIZE = 1;
     private static final Duration RUNNING_TIMEOUT = Duration.ofMinutes(5);
 
     private final DocumentGenerationJobRepository jobRepository;
