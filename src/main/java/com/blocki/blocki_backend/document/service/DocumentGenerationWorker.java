@@ -106,7 +106,7 @@ public class DocumentGenerationWorker {
                     ? DocumentGenerationClient.NotionPublish.none()
                     : result.notion();
             log.info(
-                    "document job ok uuid={} ts={} userId={} type={} status={} markdownChars={} missing={} notion={} page={} notionDetail={} attempt={}/{} ms={}",
+                    "document job ai ok uuid={} ts={} userId={} type={} status={} markdownChars={} missing={} notion={} page={} notionDetail={} attempt={}/{} ms={}",
                     job.getId(),
                     clock.instant(),
                     job.getUserId(),
@@ -127,6 +127,16 @@ public class DocumentGenerationWorker {
                         missingSources,
                         "partial".equals(result.status()));
                 recordNotion(job, result, true);
+                log.info(
+                        "document job persisted uuid={} ts={} userId={} type={} status={} attempt={}/{} ms={}",
+                        job.getId(),
+                        clock.instant(),
+                        job.getUserId(),
+                        job.getDocumentType(),
+                        result.status(),
+                        job.getAttempt(),
+                        job.getMaxAttempts(),
+                        elapsedMs(started));
             } catch (RuntimeException exception) {
                 log.error(
                         "document job persist uuid={} ts={} userId={} type={} attempt={}/{} ms={}",

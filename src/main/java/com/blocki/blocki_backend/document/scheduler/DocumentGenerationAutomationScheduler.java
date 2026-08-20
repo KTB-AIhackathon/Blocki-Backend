@@ -7,9 +7,9 @@ import com.blocki.blocki_backend.document.service.DocumentGenerationResult;
 import com.blocki.blocki_backend.document.service.DocumentGenerationService;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -72,7 +72,6 @@ public class DocumentGenerationAutomationScheduler {
     }
 
     private void dispatch(LocalDateTime scheduledAt) {
-        LocalDate scheduledDate = scheduledAt.toLocalDate();
         var userIds = automationService.findEnabledUserIds(
                 scheduledAt.getDayOfWeek(), scheduledAt.toLocalTime());
         if (!userIds.isEmpty()) {
@@ -92,22 +91,32 @@ public class DocumentGenerationAutomationScheduler {
                 automationService.disableForGithubDisconnect(userId);
                 continue;
             }
-            request(userId, DocumentType.RESUME, scheduledDate);
-            request(userId, DocumentType.PORTFOLIO, scheduledDate);
+            request(userId, DocumentType.RESUME, scheduledAt);
+            request(userId, DocumentType.PORTFOLIO, scheduledAt);
         }
     }
 
-    private void request(UUID userId, DocumentType documentType, LocalDate scheduledDate) {
-        String idempotencyKey = "document-generation-automation:" + scheduledDate + ":" + documentType.name();
+    private void request(UUID userId, DocumentType documentType, LocalDateTime scheduledAt) {
+        String idempotencyKey = "document-generation-automation:"
+                + scheduledAt.toLocalDate()
+                + ":"
+                + scheduledAt.toLocalTime().truncatedTo(ChronoUnit.MINUTES)
+                + ":"
+                + documentType.name();
         Instant ts = clock.instant();
         try {
             DocumentGenerationResult queued = documentGenerationService.request(userId, documentType, idempotencyKey);
+            String status = queued == null ? "-" : queued.status();
+            boolean reused = !"QUEUED".equals(status) && !"RUNNING".equals(status);
             log.info(
-                    "Scheduled document generation queued uuid={} ts={} userId={} type={}",
+                    reused
+                            ? "Scheduled document generation reused uuid={} ts={} userId={} type={} status={}"
+                            : "Scheduled document generation queued uuid={} ts={} userId={} type={} status={}",
                     queued == null ? "-" : queued.id(),
                     ts,
                     userId,
-                    documentType);
+                    documentType,
+                    status);
         } catch (DocumentGenerationException exception) {
             if (DocumentGenerationException.JOB_ALREADY_RUNNING.equals(exception.getCode())) {
                 log.info(

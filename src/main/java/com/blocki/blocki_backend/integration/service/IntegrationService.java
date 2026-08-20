@@ -62,13 +62,14 @@ public class IntegrationService implements IntegrationTokenProvider, NotionDashb
     @Transactional
     public URI startAuthorization(UUID userId, IntegrationProvider provider) {
         Optional<Integration> existing = integrationRepository.findByUserIdAndProvider(userId, provider);
-        if (existing.map(Integration::getStatus).filter(IntegrationStatus.CONNECTED::equals).isPresent()) {
-            throw new IntegrationException(IntegrationException.INTEGRATION_ALREADY_CONNECTED);
+        boolean alreadyConnected = existing.map(Integration::getStatus)
+                .filter(IntegrationStatus.CONNECTED::equals)
+                .isPresent();
+        if (!alreadyConnected) {
+            Integration integration = existing.orElseGet(() -> Integration.connecting(userId, provider));
+            integration.beginAuthorization();
+            integrationRepository.save(integration);
         }
-
-        Integration integration = existing.orElseGet(() -> Integration.connecting(userId, provider));
-        integration.beginAuthorization();
-        integrationRepository.save(integration);
 
         String rawState = stateGenerator.generate();
         Instant now = clock.instant();
@@ -134,6 +135,9 @@ public class IntegrationService implements IntegrationTokenProvider, NotionDashb
                 .orElseThrow(() -> new IntegrationException(IntegrationException.OAUTH_STATE_INVALID));
         integrationRepository.findByUserIdAndProvider(oauthState.getUserId(), provider)
                 .ifPresent(integration -> {
+                    if (integration.getStatus() == IntegrationStatus.CONNECTED) {
+                        return;
+                    }
                     integration.fail(IntegrationException.OAUTH_AUTHORIZATION_DENIED);
                     integrationRepository.save(integration);
                 });

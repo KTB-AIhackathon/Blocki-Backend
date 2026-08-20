@@ -22,6 +22,7 @@ import com.blocki.blocki_backend.integration.repository.IntegrationRepository;
 import com.blocki.blocki_backend.integration.repository.OAuthStateRepository;
 import com.blocki.blocki_backend.integration.security.OAuthStateGenerator;
 import com.blocki.blocki_backend.integration.security.TokenEncryptor;
+import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -195,19 +196,22 @@ class IntegrationServiceTest {
     }
 
     @Test
-    void rejects_authorization_start_for_an_already_connected_user() {
+    void issues_oauth_state_without_dropping_an_already_connected_token() {
         UUID userId = UUID.randomUUID();
         Integration integration = Integration.connecting(userId, IntegrationProvider.NOTION);
         integration.complete("existing-encrypted-token", "existing-encrypted-refresh-token", "Existing Workspace", NOW.minusSeconds(60));
         when(integrationRepository.findByUserIdAndProvider(userId, IntegrationProvider.NOTION))
                 .thenReturn(Optional.of(integration));
+        when(notionOAuthClient.buildAuthorizeUri(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(URI.create("https://api.notion.com/v1/oauth/authorize"));
 
-        assertThatThrownBy(() -> service.startAuthorization(userId, IntegrationProvider.NOTION))
-                .isInstanceOf(IntegrationException.class)
-                .extracting(exception -> ((IntegrationException) exception).getCode())
-                .isEqualTo("INTEGRATION_ALREADY_CONNECTED");
+        URI authorizeUri = service.startAuthorization(userId, IntegrationProvider.NOTION);
 
-        verify(oauthStateRepository, never()).save(org.mockito.ArgumentMatchers.any());
+        assertThat(authorizeUri).isEqualTo(URI.create("https://api.notion.com/v1/oauth/authorize"));
+        assertThat(integration.getStatus()).isEqualTo(IntegrationStatus.CONNECTED);
+        assertThat(integration.getEncryptedAccessToken()).isEqualTo("existing-encrypted-token");
+        verify(integrationRepository, never()).save(org.mockito.ArgumentMatchers.any());
+        verify(oauthStateRepository).save(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -389,5 +393,29 @@ class IntegrationServiceTest {
 
         assertThat(integration.getStatus()).isEqualTo(IntegrationStatus.ERROR);
         assertThat(integration.getErrorCode()).isEqualTo(IntegrationException.OAUTH_AUTHORIZATION_DENIED);
+    }
+
+    @Test
+    void keeps_a_connected_integration_when_reauthorization_is_cancelled() {
+        UUID userId = UUID.randomUUID();
+        String rawState = "cancelled-reauth-state";
+        OAuthState state = OAuthState.issue(
+                userId,
+                IntegrationProvider.GITHUB,
+                stateGenerator.hash(rawState),
+                NOW.plusSeconds(600));
+        Integration integration = Integration.connecting(userId, IntegrationProvider.GITHUB);
+        integration.complete("existing-encrypted-token", null, "algocean1204", NOW.minusSeconds(60));
+        when(oauthStateRepository.consumeIfValid(stateGenerator.hash(rawState), IntegrationProvider.GITHUB, NOW))
+                .thenReturn(1);
+        when(oauthStateRepository.findByStateHash(stateGenerator.hash(rawState))).thenReturn(Optional.of(state));
+        when(integrationRepository.findByUserIdAndProvider(userId, IntegrationProvider.GITHUB))
+                .thenReturn(Optional.of(integration));
+
+        service.cancelAuthorization(IntegrationProvider.GITHUB, rawState);
+
+        assertThat(integration.getStatus()).isEqualTo(IntegrationStatus.CONNECTED);
+        assertThat(integration.getEncryptedAccessToken()).isEqualTo("existing-encrypted-token");
+        verify(integrationRepository, never()).save(org.mockito.ArgumentMatchers.any());
     }
 }

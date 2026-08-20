@@ -32,8 +32,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 @ExtendWith(MockitoExtension.class)
 class DocumentGenerationAutomationSchedulerTest {
 
-    private static final String RESUME_KEY = "document-generation-automation:2026-08-24:RESUME";
-    private static final String PORTFOLIO_KEY = "document-generation-automation:2026-08-24:PORTFOLIO";
+    private static final String RESUME_KEY = "document-generation-automation:2026-08-24:21:00:RESUME";
+    private static final String PORTFOLIO_KEY = "document-generation-automation:2026-08-24:21:00:PORTFOLIO";
 
     @Mock
     private DocumentGenerationAutomationService automationService;
@@ -114,6 +114,25 @@ class DocumentGenerationAutomationSchedulerTest {
 
         verify(documentGenerationService, times(1)).request(userId, DocumentType.RESUME, RESUME_KEY);
         verify(documentGenerationService, times(1)).request(userId, DocumentType.PORTFOLIO, PORTFOLIO_KEY);
+    }
+
+    @Test
+    void later_same_day_minute_uses_a_new_idempotency_key() {
+        DocumentGenerationAutomationScheduler later = new DocumentGenerationAutomationScheduler(
+                automationService,
+                documentGenerationService,
+                Clock.fixed(Instant.parse("2026-08-24T12:30:00Z"), ZoneOffset.UTC));
+        UUID userId = UUID.randomUUID();
+        when(automationService.findEnabledUserIds(DayOfWeek.MONDAY, LocalTime.of(21, 30)))
+                .thenReturn(List.of(userId));
+        when(automationService.isGithubConnected(userId)).thenReturn(true);
+
+        later.runWeeklyDocumentGeneration();
+
+        verify(documentGenerationService).request(
+                userId, DocumentType.RESUME, "document-generation-automation:2026-08-24:21:30:RESUME");
+        verify(documentGenerationService).request(
+                userId, DocumentType.PORTFOLIO, "document-generation-automation:2026-08-24:21:30:PORTFOLIO");
     }
 
     @Test
@@ -216,7 +235,9 @@ class DocumentGenerationAutomationSchedulerTest {
 
         minuteScheduler.runWeeklyDocumentGeneration();
 
-        verify(documentGenerationService).request(userId, DocumentType.RESUME, RESUME_KEY);
-        verify(documentGenerationService).request(userId, DocumentType.PORTFOLIO, PORTFOLIO_KEY);
+        verify(documentGenerationService).request(
+                userId, DocumentType.RESUME, "document-generation-automation:2026-08-24:21:20:RESUME");
+        verify(documentGenerationService).request(
+                userId, DocumentType.PORTFOLIO, "document-generation-automation:2026-08-24:21:20:PORTFOLIO");
     }
 }
