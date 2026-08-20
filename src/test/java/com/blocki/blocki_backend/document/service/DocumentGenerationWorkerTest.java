@@ -84,6 +84,27 @@ class DocumentGenerationWorkerTest {
     }
 
     @Test
+    void fails_without_retry_when_ai_returns_http_200_with_ok_false() {
+        DocumentGenerationJobRepository jobRepository = Mockito.mock(DocumentGenerationJobRepository.class);
+        DocumentGenerationClaimService claimService = Mockito.mock(DocumentGenerationClaimService.class);
+        DocumentGenerationCompletionService completionService = Mockito.mock(DocumentGenerationCompletionService.class);
+        DocumentGenerationClient client = Mockito.mock(DocumentGenerationClient.class);
+        DocumentGenerationJob job = job();
+        job.start(NOW);
+        when(claimService.claimDueQueuedJobs(NOW)).thenReturn(List.of(job));
+        when(client.generate(any())).thenReturn(new DocumentGenerationClient.Result(
+                false, "failed", null, List.of(), "missing_pat"));
+
+        worker(jobRepository, claimService, completionService, client).processQueuedJobs();
+
+        assertThat(job.getStatus()).isEqualTo(DocumentGenerationJobStatus.FAILED);
+        assertThat(job.getErrorCode()).isEqualTo("missing_pat");
+        assertThat(job.isRetryable()).isFalse();
+        verify(jobRepository).save(job);
+        verify(completionService, Mockito.never()).complete(any(), any(), any());
+    }
+
+    @Test
     void fails_without_retry_for_invalid_internal_ai_response() {
         DocumentGenerationJobRepository jobRepository = Mockito.mock(DocumentGenerationJobRepository.class);
         DocumentGenerationClaimService claimService = Mockito.mock(DocumentGenerationClaimService.class);

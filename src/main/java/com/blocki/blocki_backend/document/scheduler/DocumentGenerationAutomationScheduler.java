@@ -47,9 +47,18 @@ public class DocumentGenerationAutomationScheduler {
                 .withSecond(0)
                 .withNano(0);
         LocalDate scheduledDate = scheduledAt.toLocalDate();
-        for (UUID userId : automationService.findEnabledUserIds(
-                scheduledAt.getDayOfWeek(), scheduledAt.toLocalTime())) {
+        var userIds = automationService.findEnabledUserIds(
+                scheduledAt.getDayOfWeek(), scheduledAt.toLocalTime());
+        if (!userIds.isEmpty()) {
+            log.info(
+                    "Scheduled document generation tick users={} day={} time={}",
+                    userIds.size(),
+                    scheduledAt.getDayOfWeek(),
+                    scheduledAt.toLocalTime());
+        }
+        for (UUID userId : userIds) {
             if (!automationService.isGithubConnected(userId)) {
+                log.warn("Scheduled document generation disabled; GitHub disconnected userId={}", userId);
                 automationService.disableForGithubDisconnect(userId);
                 continue;
             }
@@ -62,6 +71,7 @@ public class DocumentGenerationAutomationScheduler {
         String idempotencyKey = "document-generation-automation:" + scheduledDate + ":" + documentType.name();
         try {
             documentGenerationService.request(userId, documentType, idempotencyKey);
+            log.info("Scheduled document generation queued userId={} type={}", userId, documentType);
         } catch (DocumentGenerationException exception) {
             if (DocumentGenerationException.JOB_ALREADY_RUNNING.equals(exception.getCode())) {
                 log.info("Scheduled document generation skipped for userId={}, type={}", userId, documentType);
