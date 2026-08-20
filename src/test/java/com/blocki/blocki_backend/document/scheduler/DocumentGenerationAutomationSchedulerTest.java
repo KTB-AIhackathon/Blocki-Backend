@@ -11,7 +11,9 @@ import com.blocki.blocki_backend.document.service.DocumentGenerationAutomationSe
 import com.blocki.blocki_backend.document.service.DocumentGenerationException;
 import com.blocki.blocki_backend.document.service.DocumentGenerationService;
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
@@ -51,14 +53,15 @@ class DocumentGenerationAutomationSchedulerTest {
                 .getAnnotation(Scheduled.class);
 
         assertThat(scheduled).isNotNull();
-        assertThat(scheduled.cron()).isEqualTo("0 0 21 * * MON");
+        assertThat(scheduled.cron()).isEqualTo("0 * * * * *");
         assertThat(scheduled.zone()).isEqualTo("Asia/Seoul");
     }
 
     @Test
     void queues_both_document_types_with_kst_monday_keys() {
         UUID userId = UUID.randomUUID();
-        when(automationService.findEnabledUserIds()).thenReturn(List.of(userId));
+        when(automationService.findEnabledUserIds(DayOfWeek.MONDAY, LocalTime.of(21, 0)))
+                .thenReturn(List.of(userId));
         when(automationService.isGithubConnected(userId)).thenReturn(true);
 
         scheduler.runWeeklyDocumentGeneration();
@@ -70,7 +73,8 @@ class DocumentGenerationAutomationSchedulerTest {
     @Test
     void turns_off_stale_automation_without_queuing_a_job() {
         UUID userId = UUID.randomUUID();
-        when(automationService.findEnabledUserIds()).thenReturn(List.of(userId));
+        when(automationService.findEnabledUserIds(DayOfWeek.MONDAY, LocalTime.of(21, 0)))
+                .thenReturn(List.of(userId));
         when(automationService.isGithubConnected(userId)).thenReturn(false);
 
         scheduler.runWeeklyDocumentGeneration();
@@ -82,7 +86,8 @@ class DocumentGenerationAutomationSchedulerTest {
     @Test
     void skips_only_the_type_with_an_active_job() {
         UUID userId = UUID.randomUUID();
-        when(automationService.findEnabledUserIds()).thenReturn(List.of(userId));
+        when(automationService.findEnabledUserIds(DayOfWeek.MONDAY, LocalTime.of(21, 0)))
+                .thenReturn(List.of(userId));
         when(automationService.isGithubConnected(userId)).thenReturn(true);
         when(documentGenerationService.request(userId, DocumentType.RESUME, RESUME_KEY))
                 .thenThrow(DocumentGenerationException.jobAlreadyRunning(UUID.randomUUID()));
@@ -95,7 +100,8 @@ class DocumentGenerationAutomationSchedulerTest {
     @Test
     void uses_the_same_keys_when_the_scheduler_method_is_invoked_twice() {
         UUID userId = UUID.randomUUID();
-        when(automationService.findEnabledUserIds()).thenReturn(List.of(userId));
+        when(automationService.findEnabledUserIds(DayOfWeek.MONDAY, LocalTime.of(21, 0)))
+                .thenReturn(List.of(userId));
         when(automationService.isGithubConnected(userId)).thenReturn(true);
 
         scheduler.runWeeklyDocumentGeneration();
@@ -109,7 +115,8 @@ class DocumentGenerationAutomationSchedulerTest {
     void continues_with_the_next_user_after_an_unexpected_queue_failure() {
         UUID failedUserId = UUID.randomUUID();
         UUID nextUserId = UUID.randomUUID();
-        when(automationService.findEnabledUserIds()).thenReturn(List.of(failedUserId, nextUserId));
+        when(automationService.findEnabledUserIds(DayOfWeek.MONDAY, LocalTime.of(21, 0)))
+                .thenReturn(List.of(failedUserId, nextUserId));
         when(automationService.isGithubConnected(failedUserId)).thenReturn(true);
         when(automationService.isGithubConnected(nextUserId)).thenReturn(true);
         when(documentGenerationService.request(failedUserId, DocumentType.RESUME, RESUME_KEY))

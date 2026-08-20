@@ -36,6 +36,6 @@ public class DocumentGenerationAutomationController {
     @PutMapping
     public ApiResponse<DocumentGenerationAutomationResponse> update(
             @Valid @RequestBody DocumentGenerationAutomationUpdateRequest request) {
-        return ApiResponse.of(automationService.update(currentUserIdResolver.resolve(), request.enabled()));
+        return ApiResponse.of(automationService.update(currentUserIdResolver.resolve(), request));
     }
 }

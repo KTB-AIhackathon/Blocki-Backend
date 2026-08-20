@@ -27,4 +27,5 @@ class DocumentGenerationAutomationRepositoryTest {
                 .extracting(DocumentGenerationAutomation::getUserId)
                 .containsExactly(enabledUserId);
     }
+
 }

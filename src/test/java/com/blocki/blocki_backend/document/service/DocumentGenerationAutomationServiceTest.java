@@ -9,15 +9,19 @@ import static org.mockito.Mockito.when;
 import com.blocki.blocki_backend.common.exception.BusinessException;
 import com.blocki.blocki_backend.common.exception.ErrorCode;
 import com.blocki.blocki_backend.document.dto.DocumentGenerationAutomationResponse;
+import com.blocki.blocki_backend.document.dto.DocumentGenerationAutomationUpdateRequest;
 import com.blocki.blocki_backend.document.entity.DocumentGenerationAutomation;
 import com.blocki.blocki_backend.document.repository.DocumentGenerationAutomationRepository;
 import com.blocki.blocki_backend.integration.entity.Integration;
 import com.blocki.blocki_backend.integration.entity.IntegrationProvider;
 import com.blocki.blocki_backend.integration.repository.IntegrationRepository;
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -92,6 +96,31 @@ class DocumentGenerationAutomationServiceTest {
     }
 
     @Test
+    void updates_the_weekly_schedule_and_returns_it() {
+        UUID userId = UUID.randomUUID();
+        Integration github = Integration.connecting(userId, IntegrationProvider.GITHUB);
+        github.complete("encrypted-access-token", null, null, NOW);
+        DocumentGenerationAutomation setting = DocumentGenerationAutomation.create(userId, false, NOW);
+        when(integrationRepository.findWithLockByUserIdAndProvider(userId, IntegrationProvider.GITHUB))
+                .thenReturn(Optional.of(github));
+        when(automationRepository.findByUserId(userId)).thenReturn(Optional.of(setting));
+        when(automationRepository.save(any(DocumentGenerationAutomation.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        DocumentGenerationAutomationResponse response = service.update(
+                userId,
+                new DocumentGenerationAutomationUpdateRequest(
+                        true,
+                        new DocumentGenerationAutomationUpdateRequest.Schedule("WEDNESDAY", "21:30")));
+
+        assertThat(response.enabled()).isTrue();
+        assertThat(response.schedule().dayOfWeek()).isEqualTo("WEDNESDAY");
+        assertThat(response.schedule().time()).isEqualTo("21:30");
+        assertThat(setting.getScheduleDayOfWeek()).isEqualTo(DayOfWeek.WEDNESDAY);
+        assertThat(setting.getScheduleTime()).isEqualTo(LocalTime.of(21, 30));
+    }
+
+    @Test
     void disables_an_existing_setting_when_github_is_disconnected() {
         UUID userId = UUID.randomUUID();
         DocumentGenerationAutomation setting = DocumentGenerationAutomation.create(userId, true, NOW);
@@ -101,5 +130,19 @@ class DocumentGenerationAutomationServiceTest {
 
         assertThat(setting.isEnabled()).isFalse();
         verify(automationRepository).save(setting);
+    }
+
+    @Test
+    void finds_only_enabled_users_due_at_the_current_weekly_schedule() {
+        UUID matchingUserId = UUID.randomUUID();
+        UUID differentScheduleUserId = UUID.randomUUID();
+        when(automationRepository.findByEnabledTrue()).thenReturn(List.of(
+                DocumentGenerationAutomation.create(
+                        matchingUserId, true, DayOfWeek.WEDNESDAY, LocalTime.of(21, 30), NOW),
+                DocumentGenerationAutomation.create(
+                        differentScheduleUserId, true, DayOfWeek.THURSDAY, LocalTime.of(21, 30), NOW)));
+
+        assertThat(service.findEnabledUserIds(DayOfWeek.WEDNESDAY, LocalTime.of(21, 30)))
+                .containsExactly(matchingUserId);
     }
 }
