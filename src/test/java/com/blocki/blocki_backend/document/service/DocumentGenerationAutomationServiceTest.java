@@ -48,7 +48,7 @@ class DocumentGenerationAutomationServiceTest {
     }
 
     @Test
-    void returns_off_when_the_user_has_no_setting_row() {
+    void returns_off_and_default_schedule_when_the_user_has_no_setting_row() {
         UUID userId = UUID.randomUUID();
         when(automationRepository.findByUserId(userId)).thenReturn(Optional.empty());
 
@@ -61,12 +61,26 @@ class DocumentGenerationAutomationServiceTest {
     }
 
     @Test
+    void returns_the_saved_schedule_when_the_user_has_a_setting_row() {
+        UUID userId = UUID.randomUUID();
+        DocumentGenerationAutomation setting =
+                DocumentGenerationAutomation.create(userId, true, "THURSDAY", "15:00", NOW);
+        when(automationRepository.findByUserId(userId)).thenReturn(Optional.of(setting));
+
+        DocumentGenerationAutomationResponse response = service.get(userId);
+
+        assertThat(response.enabled()).isTrue();
+        assertThat(response.schedule().dayOfWeek()).isEqualTo("THURSDAY");
+        assertThat(response.schedule().time()).isEqualTo("15:00");
+    }
+
+    @Test
     void rejects_enabling_when_github_is_not_connected() {
         UUID userId = UUID.randomUUID();
         when(integrationRepository.findWithLockByUserIdAndProvider(userId, IntegrationProvider.GITHUB))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.update(userId, true))
+        assertThatThrownBy(() -> service.update(userId, true, "MONDAY", "21:00"))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(ErrorCode.GITHUB_INTEGRATION_REQUIRED);
@@ -83,12 +97,68 @@ class DocumentGenerationAutomationServiceTest {
         when(automationRepository.save(any(DocumentGenerationAutomation.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        DocumentGenerationAutomationResponse response = service.update(userId, true);
+        DocumentGenerationAutomationResponse response = service.update(userId, true, "WEDNESDAY", "09:00");
 
         assertThat(response.enabled()).isTrue();
+        assertThat(response.schedule().dayOfWeek()).isEqualTo("WEDNESDAY");
+        assertThat(response.schedule().time()).isEqualTo("09:00");
         ArgumentCaptor<DocumentGenerationAutomation> captor = ArgumentCaptor.forClass(DocumentGenerationAutomation.class);
         verify(automationRepository).save(captor.capture());
         assertThat(captor.getValue().isEnabled()).isTrue();
+        assertThat(captor.getValue().getDayOfWeek()).isEqualTo("WEDNESDAY");
+        assertThat(captor.getValue().getTime()).isEqualTo("09:00");
+    }
+
+    @Test
+    void updates_the_schedule_of_an_existing_setting() {
+        UUID userId = UUID.randomUUID();
+        DocumentGenerationAutomation setting =
+                DocumentGenerationAutomation.create(userId, false, "MONDAY", "21:00", NOW);
+        when(automationRepository.findByUserId(userId)).thenReturn(Optional.of(setting));
+        when(automationRepository.save(any(DocumentGenerationAutomation.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        DocumentGenerationAutomationResponse response = service.update(userId, false, "FRIDAY", "18:30");
+
+        assertThat(response.schedule().dayOfWeek()).isEqualTo("FRIDAY");
+        assertThat(response.schedule().time()).isEqualTo("18:30");
+        assertThat(setting.getDayOfWeek()).isEqualTo("FRIDAY");
+        assertThat(setting.getTime()).isEqualTo("18:30");
+    }
+
+    @Test
+    void enabled_only_update_keeps_the_previously_saved_schedule() {
+        UUID userId = UUID.randomUUID();
+        DocumentGenerationAutomation setting =
+                DocumentGenerationAutomation.create(userId, false, "SATURDAY", "08:00", NOW);
+        when(automationRepository.findByUserId(userId)).thenReturn(Optional.of(setting));
+        when(automationRepository.save(any(DocumentGenerationAutomation.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        DocumentGenerationAutomationResponse response = service.update(userId, false);
+
+        assertThat(response.schedule().dayOfWeek()).isEqualTo("SATURDAY");
+        assertThat(response.schedule().time()).isEqualTo("08:00");
+    }
+
+    @Test
+    void rejects_an_invalid_day_of_week() {
+        UUID userId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> service.update(userId, false, "FUNDAY", "21:00"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_PARAMETER);
+    }
+
+    @Test
+    void rejects_an_invalid_time_format() {
+        UUID userId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> service.update(userId, false, "MONDAY", "9:00"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_PARAMETER);
     }
 
     @Test

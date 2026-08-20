@@ -39,7 +39,7 @@ class DocumentGenerationAutomationControllerTest {
     void returns_the_current_users_automation_setting() throws Exception {
         UUID userId = UUID.randomUUID();
         when(currentUserIdResolver.resolve()).thenReturn(userId);
-        when(automationService.get(userId)).thenReturn(DocumentGenerationAutomationResponse.of(false));
+        when(automationService.get(userId)).thenReturn(DocumentGenerationAutomationResponse.of(false, "MONDAY", "21:00"));
 
         mockMvc.perform(get("/api/v1/document-generation-automation"))
                 .andExpect(status().isOk())
@@ -50,28 +50,31 @@ class DocumentGenerationAutomationControllerTest {
     }
 
     @Test
-    void enables_automation_for_the_current_user() throws Exception {
+    void enables_automation_with_the_requested_schedule_for_the_current_user() throws Exception {
         UUID userId = UUID.randomUUID();
         when(currentUserIdResolver.resolve()).thenReturn(userId);
-        when(automationService.update(userId, true)).thenReturn(DocumentGenerationAutomationResponse.of(true));
+        when(automationService.update(userId, true, "WEDNESDAY", "21:00"))
+                .thenReturn(DocumentGenerationAutomationResponse.of(true, "WEDNESDAY", "21:00"));
 
         mockMvc.perform(put("/api/v1/document-generation-automation")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"enabled\":true}"))
+                        .content("{\"enabled\":true,\"schedule\":{\"dayOfWeek\":\"WEDNESDAY\",\"time\":\"21:00\"}}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.enabled").value(true));
+                .andExpect(jsonPath("$.data.enabled").value(true))
+                .andExpect(jsonPath("$.data.schedule.dayOfWeek").value("WEDNESDAY"))
+                .andExpect(jsonPath("$.data.schedule.time").value("21:00"));
     }
 
     @Test
     void returns_conflict_when_github_is_required_to_enable_automation() throws Exception {
         UUID userId = UUID.randomUUID();
         when(currentUserIdResolver.resolve()).thenReturn(userId);
-        when(automationService.update(eq(userId), eq(true)))
+        when(automationService.update(eq(userId), eq(true), eq("MONDAY"), eq("21:00")))
                 .thenThrow(new BusinessException(ErrorCode.GITHUB_INTEGRATION_REQUIRED));
 
         mockMvc.perform(put("/api/v1/document-generation-automation")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"enabled\":true}"))
+                        .content("{\"enabled\":true,\"schedule\":{\"dayOfWeek\":\"MONDAY\",\"time\":\"21:00\"}}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("GITHUB_INTEGRATION_REQUIRED"));
     }
@@ -80,7 +83,34 @@ class DocumentGenerationAutomationControllerTest {
     void rejects_a_request_without_enabled() throws Exception {
         mockMvc.perform(put("/api/v1/document-generation-automation")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+                        .content("{\"schedule\":{\"dayOfWeek\":\"MONDAY\",\"time\":\"21:00\"}}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"));
+    }
+
+    @Test
+    void rejects_a_request_without_schedule() throws Exception {
+        mockMvc.perform(put("/api/v1/document-generation-automation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"));
+    }
+
+    @Test
+    void rejects_an_invalid_day_of_week_value() throws Exception {
+        mockMvc.perform(put("/api/v1/document-generation-automation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true,\"schedule\":{\"dayOfWeek\":\"FUNDAY\",\"time\":\"21:00\"}}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"));
+    }
+
+    @Test
+    void rejects_an_invalid_time_format() throws Exception {
+        mockMvc.perform(put("/api/v1/document-generation-automation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true,\"schedule\":{\"dayOfWeek\":\"MONDAY\",\"time\":\"9:00\"}}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"));
     }
