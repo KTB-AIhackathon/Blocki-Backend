@@ -6,6 +6,7 @@ import com.blocki.blocki_backend.document.service.DocumentGenerationException;
 import com.blocki.blocki_backend.document.service.DocumentGenerationService;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -40,10 +41,14 @@ public class DocumentGenerationAutomationScheduler {
         this.clock = clock;
     }
 
-    @Scheduled(cron = "0 0 21 * * MON", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 * * * * *", zone = "Asia/Seoul")
     public void runWeeklyDocumentGeneration() {
-        LocalDate scheduledDate = LocalDate.now(clock.withZone(SCHEDULE_ZONE));
-        for (UUID userId : automationService.findEnabledUserIds()) {
+        LocalDateTime scheduledAt = LocalDateTime.now(clock.withZone(SCHEDULE_ZONE))
+                .withSecond(0)
+                .withNano(0);
+        LocalDate scheduledDate = scheduledAt.toLocalDate();
+        for (UUID userId : automationService.findEnabledUserIds(
+                scheduledAt.getDayOfWeek(), scheduledAt.toLocalTime())) {
             if (!automationService.isGithubConnected(userId)) {
                 automationService.disableForGithubDisconnect(userId);
                 continue;

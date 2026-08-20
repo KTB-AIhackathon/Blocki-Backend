@@ -3,6 +3,7 @@ package com.blocki.blocki_backend.document.service;
 import com.blocki.blocki_backend.common.exception.BusinessException;
 import com.blocki.blocki_backend.common.exception.ErrorCode;
 import com.blocki.blocki_backend.document.dto.DocumentGenerationAutomationResponse;
+import com.blocki.blocki_backend.document.dto.DocumentGenerationAutomationUpdateRequest;
 import com.blocki.blocki_backend.document.entity.DocumentGenerationAutomation;
 import com.blocki.blocki_backend.document.repository.DocumentGenerationAutomationRepository;
 import com.blocki.blocki_backend.integration.entity.Integration;
@@ -10,7 +11,10 @@ import com.blocki.blocki_backend.integration.entity.IntegrationProvider;
 import com.blocki.blocki_backend.integration.entity.IntegrationStatus;
 import com.blocki.blocki_backend.integration.repository.IntegrationRepository;
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,24 +46,33 @@ public class DocumentGenerationAutomationService {
 
     @Transactional(readOnly = true)
     public DocumentGenerationAutomationResponse get(UUID userId) {
-        boolean enabled = automationRepository.findByUserId(userId)
-                .map(DocumentGenerationAutomation::isEnabled)
-                .orElse(false);
-        return DocumentGenerationAutomationResponse.of(enabled);
+        return automationRepository.findByUserId(userId)
+                .map(DocumentGenerationAutomationResponse::of)
+                .orElseGet(() -> DocumentGenerationAutomationResponse.of(false));
     }
 
     @Transactional
     public DocumentGenerationAutomationResponse update(UUID userId, boolean enabled) {
+        return update(userId, new DocumentGenerationAutomationUpdateRequest(enabled, null));
+    }
+
+    @Transactional
+    public DocumentGenerationAutomationResponse update(
+            UUID userId, DocumentGenerationAutomationUpdateRequest request) {
+        boolean enabled = request.enabled();
         if (enabled) {
             requireConnectedGithub(userId);
         }
 
         Instant now = clock.instant();
+        ScheduleValues schedule = resolveSchedule(userId, request.schedule());
         DocumentGenerationAutomation automation = automationRepository.findByUserId(userId)
-                .orElseGet(() -> DocumentGenerationAutomation.create(userId, enabled, now));
+                .orElseGet(() -> DocumentGenerationAutomation.create(
+                        userId, enabled, schedule.dayOfWeek(), schedule.time(), now));
+        automation.changeSchedule(schedule.dayOfWeek(), schedule.time(), now);
         automation.changeEnabled(enabled, now);
         automationRepository.save(automation);
-        return DocumentGenerationAutomationResponse.of(automation.isEnabled());
+        return DocumentGenerationAutomationResponse.of(automation);
     }
 
     @Transactional
@@ -71,8 +84,10 @@ public class DocumentGenerationAutomationService {
     }
 
     @Transactional(readOnly = true)
-    public List<UUID> findEnabledUserIds() {
+    public List<UUID> findEnabledUserIds(DayOfWeek dayOfWeek, LocalTime time) {
         return automationRepository.findByEnabledTrue().stream()
+                .filter(automation -> automation.getScheduleDayOfWeek() == dayOfWeek)
+                .filter(automation -> automation.getScheduleTime().equals(time))
                 .map(DocumentGenerationAutomation::getUserId)
                 .toList();
     }
@@ -89,5 +104,25 @@ public class DocumentGenerationAutomationService {
         integrationRepository.findWithLockByUserIdAndProvider(userId, IntegrationProvider.GITHUB)
                 .filter(integration -> integration.getStatus() == IntegrationStatus.CONNECTED)
                 .orElseThrow(() -> new BusinessException(ErrorCode.GITHUB_INTEGRATION_REQUIRED));
+    }
+
+    private ScheduleValues resolveSchedule(
+            UUID userId, DocumentGenerationAutomationUpdateRequest.Schedule requestedSchedule) {
+        if (requestedSchedule == null) {
+            return automationRepository.findByUserId(userId)
+                    .map(automation -> new ScheduleValues(
+                            automation.getScheduleDayOfWeek(), automation.getScheduleTime()))
+                    .orElseGet(() -> new ScheduleValues(DayOfWeek.MONDAY, LocalTime.of(21, 0)));
+        }
+        try {
+            return new ScheduleValues(
+                    DayOfWeek.valueOf(requestedSchedule.dayOfWeek()),
+                    LocalTime.parse(requestedSchedule.time()));
+        } catch (IllegalArgumentException | DateTimeParseException exception) {
+            throw new BusinessException(ErrorCode.INVALID_PARAMETER);
+        }
+    }
+
+    private record ScheduleValues(DayOfWeek dayOfWeek, LocalTime time) {
     }
 }
