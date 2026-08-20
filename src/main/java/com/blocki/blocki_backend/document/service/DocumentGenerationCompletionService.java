@@ -29,6 +29,7 @@ public class DocumentGenerationCompletionService {
         complete(job, generated, missingSources, false);
     }
 
+    @Transactional
     public void complete(
             DocumentGenerationJob job, GeneratedDocument generated, String missingSources, boolean partial) {
         validate(generated);

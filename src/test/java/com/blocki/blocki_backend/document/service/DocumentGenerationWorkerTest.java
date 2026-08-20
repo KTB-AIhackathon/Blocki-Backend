@@ -2,6 +2,7 @@ package com.blocki.blocki_backend.document.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -44,6 +45,28 @@ class DocumentGenerationWorkerTest {
                 any(), generated.capture(), org.mockito.ArgumentMatchers.eq("GITHUB"), org.mockito.ArgumentMatchers.eq(false));
         assertThat(generated.getValue()).isEqualTo(new GeneratedDocument("이력서", "# 내용"));
         assertThat(job.getStatus()).isEqualTo(DocumentGenerationJobStatus.RUNNING);
+    }
+
+    @Test
+    void retries_when_persist_throws_instead_of_leaving_the_job_running() {
+        DocumentGenerationJobRepository jobRepository = Mockito.mock(DocumentGenerationJobRepository.class);
+        DocumentGenerationClaimService claimService = Mockito.mock(DocumentGenerationClaimService.class);
+        DocumentGenerationCompletionService completionService = Mockito.mock(DocumentGenerationCompletionService.class);
+        DocumentGenerationClient client = Mockito.mock(DocumentGenerationClient.class);
+        DocumentGenerationJob job = job();
+        job.start(NOW);
+        when(claimService.claimDueQueuedJobs(NOW)).thenReturn(List.of(job));
+        when(client.generate(any())).thenReturn(new DocumentGenerationClient.Result(
+                true, "proposed", "# 내용", List.of(), null));
+        Mockito.doThrow(new IllegalStateException("No active transaction"))
+                .when(completionService)
+                .complete(any(), any(), any(), anyBoolean());
+
+        worker(jobRepository, claimService, completionService, client).processQueuedJobs();
+
+        assertThat(job.getStatus()).isEqualTo(DocumentGenerationJobStatus.QUEUED);
+        assertThat(job.getAttempt()).isEqualTo(2);
+        verify(jobRepository).save(job);
     }
 
     @Test
