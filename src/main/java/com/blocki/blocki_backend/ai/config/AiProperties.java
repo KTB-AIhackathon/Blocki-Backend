@@ -7,6 +7,7 @@ public class AiProperties {
 
     private String baseUrl;
     private String internalKey;
+    private int timeoutSeconds = 30;
 
     public String getBaseUrl() {
         return baseUrl;
@@ -22,5 +23,13 @@ public class AiProperties {
 
     public void setInternalKey(String internalKey) {
         this.internalKey = internalKey;
+    }
+
+    public int getTimeoutSeconds() {
+        return timeoutSeconds;
+    }
+
+    public void setTimeoutSeconds(int timeoutSeconds) {
+        this.timeoutSeconds = timeoutSeconds;
     }
 }

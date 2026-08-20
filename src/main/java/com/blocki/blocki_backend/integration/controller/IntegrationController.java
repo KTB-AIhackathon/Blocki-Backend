@@ -2,6 +2,7 @@ package com.blocki.blocki_backend.integration.controller;
 
 import com.blocki.blocki_backend.common.response.ApiResponse;
 import com.blocki.blocki_backend.common.response.ErrorResponse;
+import com.blocki.blocki_backend.integration.config.FrontendProperties;
 import com.blocki.blocki_backend.integration.entity.IntegrationProvider;
 import com.blocki.blocki_backend.integration.service.IntegrationException;
 import com.blocki.blocki_backend.integration.service.IntegrationResult;
@@ -13,12 +14,15 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.servlet.view.RedirectView;
+import org.springframework.web.util.UriComponentsBuilder;
 
 @RestController
 @RequestMapping("/api/v1/integrations")
@@ -27,11 +31,15 @@ public class IntegrationController {
 
     private final IntegrationService integrationService;
     private final CurrentUserIdResolver currentUserIdResolver;
+    private final FrontendProperties frontendProperties;
 
     public IntegrationController(
-            IntegrationService integrationService, CurrentUserIdResolver currentUserIdResolver) {
+            IntegrationService integrationService,
+            CurrentUserIdResolver currentUserIdResolver,
+            FrontendProperties frontendProperties) {
         this.integrationService = integrationService;
         this.currentUserIdResolver = currentUserIdResolver;
+        this.frontendProperties = frontendProperties;
     }
 
     @GetMapping
@@ -47,6 +55,18 @@ public class IntegrationController {
     public ResponseEntity<Void> authorize(@PathVariable String provider) {
         URI authorizeUri = integrationService.startAuthorization(currentUserIdResolver.resolve(), parseProvider(provider));
         return ResponseEntity.status(HttpStatus.FOUND).location(authorizeUri).build();
+    }
+
+    @PostMapping("/{provider}/authorize-url")
+    public ApiResponse<AuthorizeUrlResponse> authorizeUrl(@PathVariable String provider) {
+        URI authorizeUri = integrationService.startAuthorization(currentUserIdResolver.resolve(), parseProvider(provider));
+        return ApiResponse.of(new AuthorizeUrlResponse(authorizeUri.toString()));
+    }
+
+    @DeleteMapping("/{provider}")
+    public ApiResponse<IntegrationResponse> disconnect(@PathVariable String provider) {
+        IntegrationResult result = integrationService.disconnect(currentUserIdResolver.resolve(), parseProvider(provider));
+        return ApiResponse.of(IntegrationResponse.from(result));
     }
 
     @GetMapping("/{provider}/callback")
@@ -87,11 +107,14 @@ public class IntegrationController {
     }
 
     private RedirectView workspaceRedirect(String provider, String result, String errorCode) {
-        String url = "/workspace?integration=" + provider + "&result=" + result;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(frontendProperties.getOrigin())
+                .path("/oauth/callback")
+                .queryParam("provider", provider)
+                .queryParam("result", result);
         if (errorCode != null) {
-            url += "&error=" + errorCode;
+            builder.queryParam("error", errorCode);
         }
-        RedirectView redirectView = new RedirectView(url);
+        RedirectView redirectView = new RedirectView(builder.build().encode().toUriString());
         redirectView.setStatusCode(HttpStatus.FOUND);
         return redirectView;
     }
@@ -108,6 +131,9 @@ public class IntegrationController {
     public record IntegrationListResponse(List<IntegrationResponse> items) {
     }
 
+    public record AuthorizeUrlResponse(String authorizeUrl) {
+    }
+
     public record IntegrationResponse(
             IntegrationProvider provider,
             String status,
@@ -115,7 +141,7 @@ public class IntegrationController {
             java.time.Instant connectedAt,
             String errorCode
     ) {
-        private static IntegrationResponse from(IntegrationResult result) {
+        static IntegrationResponse from(IntegrationResult result) {
             return new IntegrationResponse(
                     result.provider(),
                     result.status().name(),

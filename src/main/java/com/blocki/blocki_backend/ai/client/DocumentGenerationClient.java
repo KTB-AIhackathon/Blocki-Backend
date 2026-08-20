@@ -1,5 +1,7 @@
 package com.blocki.blocki_backend.ai.client;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.blocki.blocki_backend.ai.config.AiProperties;
 import com.blocki.blocki_backend.document.entity.DocumentGenerationJob;
 import com.blocki.blocki_backend.integration.entity.IntegrationProvider;
@@ -7,8 +9,12 @@ import com.blocki.blocki_backend.integration.service.IntegrationTokenProvider;
 import com.blocki.blocki_backend.user.entity.User;
 import com.blocki.blocki_backend.user.repository.UserRepository;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
 public class DocumentGenerationClient {
 
@@ -16,19 +22,21 @@ public class DocumentGenerationClient {
     private final AiProperties properties;
     private final IntegrationTokenProvider integrationTokenProvider;
     private final UserRepository userRepository;
+    private final JsonMapper jsonMapper;
 
     public DocumentGenerationClient(
             RestClient restClient,
             AiProperties properties,
             IntegrationTokenProvider integrationTokenProvider,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            JsonMapper jsonMapper) {
         this.restClient = restClient;
         this.properties = properties;
         this.integrationTokenProvider = integrationTokenProvider;
         this.userRepository = userRepository;
+        this.jsonMapper = jsonMapper;
     }
 
-    @SuppressWarnings("unchecked")
     public Result generate(DocumentGenerationJob job) {
         RestClient.RequestBodySpec request = restClient.post()
                 .uri("/internal/jobs")
@@ -37,46 +45,101 @@ public class DocumentGenerationClient {
                 .ifPresent(token -> request.header("X-GitHub-Pat", token));
         User user = userRepository.findById(job.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("Document generation user does not exist"));
-        Map<String, Object> response = request.body(Map.of(
-                        "job_id", job.getId().toString(),
-                        "user_id", job.getUserId().toString(),
-                        "job_type", "profile_document",
-                        "document", Map.of(
-                                "kind", job.getDocumentType().name().toLowerCase(),
-                                "profile_fields", profileFields(user))))
-                .retrieve().body(Map.class);
-        if (response == null) {
-            throw new IllegalArgumentException("AI response is empty");
+        String responseBody;
+        try {
+            responseBody = request.body(new InternalJobRequest(
+                            job.getId().toString(),
+                            job.getUserId().toString(),
+                            "profile_document",
+                            new InternalDocument(
+                                    job.getDocumentType().name().toLowerCase(),
+                                    profileFields(user))))
+                    .retrieve().body(String.class);
+        } catch (RestClientResponseException exception) {
+            throw InternalAiClientException.fromResponse(exception);
+        } catch (RestClientException exception) {
+            throw InternalAiClientException.transport(exception);
         }
-        Map<String, Object> artifact = response.get("artifact") instanceof Map<?, ?> value
-                ? (Map<String, Object>) value
-                : Map.of();
-        String markdown = string(artifact.get("body_markdown"));
-        return new Result(
-                Boolean.TRUE.equals(response.get("ok")),
-                string(response.get("status")),
-                markdown,
-                strings(response.get("missing_sources")),
-                string(response.get("error_code")));
+        return toResult(responseBody);
     }
 
-    private static String string(Object value) {
-        return value instanceof String string ? string : null;
-    }
-
-    private static List<String> strings(Object value) {
-        if (!(value instanceof List<?> values)) {
-            return List.of();
+    private Result toResult(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            throw InternalAiClientException.invalidResponse(new IllegalArgumentException("AI response is empty"));
         }
-        return values.stream().filter(String.class::isInstance).map(String.class::cast).toList();
+        try {
+            InternalJobResponse response = jsonMapper.readValue(responseBody, InternalJobResponse.class);
+            return validate(response);
+        } catch (JacksonException | IllegalArgumentException exception) {
+            throw InternalAiClientException.invalidResponse(exception);
+        }
     }
 
-    private static Map<String, String> profileFields(User user) {
-        return Map.of(
-                "name", user.getName(),
-                "contact_md", "",
-                "experience_md", "",
-                "education_md", "");
+    private static Result validate(InternalJobResponse response) {
+        if (response == null || response.ok() == null) {
+            throw new IllegalArgumentException("AI response must include ok");
+        }
+        List<String> missingSources = response.missingSources() == null ? List.of() : response.missingSources();
+        if (!missingSources.stream().allMatch("GITHUB"::equals)) {
+            throw new IllegalArgumentException("AI response has unsupported missing source");
+        }
+        if (!response.ok()) {
+            if (!"failed".equals(response.status()) || isBlank(response.errorCode())) {
+                throw new IllegalArgumentException("AI failure response is invalid");
+            }
+            return new Result(false, response.status(), null, missingSources, response.errorCode());
+        }
+        if (!Set.of("proposed", "partial", "no_change").contains(response.status())
+                || response.artifact() == null
+                || isBlank(response.artifact().kind())
+                || isBlank(response.artifact().title())
+                || isBlank(response.artifact().bodyMarkdown())) {
+            throw new IllegalArgumentException("AI success response is invalid");
+        }
+        return new Result(true, response.status(), response.artifact().bodyMarkdown(), missingSources, null);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static ProfileFields profileFields(User user) {
+        return new ProfileFields(user.getName(), "", "", "");
+    }
+
+    private record InternalJobRequest(
+            @JsonProperty("job_id") String jobId,
+            @JsonProperty("user_id") String userId,
+            @JsonProperty("job_type") String jobType,
+            @JsonProperty("document") InternalDocument document) {
+    }
+
+    private record InternalDocument(
+            @JsonProperty("kind") String kind,
+            @JsonProperty("profile_fields") ProfileFields profileFields) {
+    }
+
+    private record ProfileFields(
+            @JsonProperty("name") String name,
+            @JsonProperty("contact_md") String contactMd,
+            @JsonProperty("experience_md") String experienceMd,
+            @JsonProperty("education_md") String educationMd) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record InternalJobResponse(
+            @JsonProperty("ok") Boolean ok,
+            @JsonProperty("status") String status,
+            @JsonProperty("artifact") InternalArtifact artifact,
+            @JsonProperty("missing_sources") List<String> missingSources,
+            @JsonProperty("error_code") String errorCode) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record InternalArtifact(
+            @JsonProperty("kind") String kind,
+            @JsonProperty("title") String title,
+            @JsonProperty("body_markdown") String bodyMarkdown) {
     }
 
     public record Result(boolean ok, String status, String markdown, List<String> missingSources, String errorCode) {
