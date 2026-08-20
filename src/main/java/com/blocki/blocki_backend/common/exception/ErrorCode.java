@@ -22,6 +22,7 @@ public enum ErrorCode {
 
 	EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
 	INTEGRATION_ALREADY_CONNECTED(HttpStatus.CONFLICT, "이미 연결된 제공자입니다."),
+	GITHUB_INTEGRATION_REQUIRED(HttpStatus.CONFLICT, "GitHub 연동 후 자동 생성 기능을 켤 수 있습니다."),
 	JOB_ALREADY_RUNNING(HttpStatus.CONFLICT, "이미 진행 중인 작업이 있습니다."),
 	IDEMPOTENCY_KEY_REUSED(HttpStatus.CONFLICT, "같은 Idempotency-Key에 다른 요청 본문이 재사용되었습니다."),
 	REFLECTION_ALREADY_PUBLISHED(HttpStatus.CONFLICT, "이미 발행된 회고입니다."),

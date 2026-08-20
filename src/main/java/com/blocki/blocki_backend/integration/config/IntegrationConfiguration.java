@@ -1,5 +1,6 @@
 package com.blocki.blocki_backend.integration.config;
 
+import com.blocki.blocki_backend.document.service.DocumentGenerationAutomationService;
 import com.blocki.blocki_backend.integration.client.github.GithubOAuthClient;
 import com.blocki.blocki_backend.integration.client.notion.NotionOAuthClient;
 import com.blocki.blocki_backend.integration.repository.IntegrationRepository;
@@ -39,7 +40,8 @@ public class IntegrationConfiguration {
             NotionOAuthClient notionOAuthClient,
             GithubOAuthClient githubOAuthClient,
             OAuthStateGenerator stateGenerator,
-            TokenEncryptor tokenEncryptor) {
+            TokenEncryptor tokenEncryptor,
+            DocumentGenerationAutomationService documentGenerationAutomationService) {
         return new IntegrationService(
                 integrationRepository,
                 oauthStateRepository,
@@ -47,6 +49,7 @@ public class IntegrationConfiguration {
                 githubOAuthClient,
                 stateGenerator,
                 tokenEncryptor,
+                documentGenerationAutomationService,
                 Clock.systemUTC());
     }
 }

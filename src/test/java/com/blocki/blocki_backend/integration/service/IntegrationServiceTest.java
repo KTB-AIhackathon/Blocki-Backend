@@ -13,6 +13,7 @@ import com.blocki.blocki_backend.integration.client.notion.NotionOAuthClientExce
 import com.blocki.blocki_backend.integration.client.notion.NotionTokenResponse;
 import com.blocki.blocki_backend.integration.client.github.GithubOAuthClient;
 import com.blocki.blocki_backend.integration.client.github.GithubTokenResponse;
+import com.blocki.blocki_backend.document.service.DocumentGenerationAutomationService;
 import com.blocki.blocki_backend.integration.entity.Integration;
 import com.blocki.blocki_backend.integration.entity.IntegrationProvider;
 import com.blocki.blocki_backend.integration.entity.IntegrationStatus;
@@ -53,6 +54,9 @@ class IntegrationServiceTest {
     @Mock
     private GithubOAuthClient githubOAuthClient;
 
+    @Mock
+    private DocumentGenerationAutomationService documentGenerationAutomationService;
+
     private final OAuthStateGenerator stateGenerator = new OAuthStateGenerator();
     private final TokenEncryptor tokenEncryptor = new TokenEncryptor(ENCRYPTION_KEY);
     private IntegrationService service;
@@ -66,6 +70,7 @@ class IntegrationServiceTest {
                 githubOAuthClient,
                 stateGenerator,
                 tokenEncryptor,
+                documentGenerationAutomationService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -315,7 +320,7 @@ class IntegrationServiceTest {
         UUID userId = UUID.randomUUID();
         Integration integration = Integration.connecting(userId, IntegrationProvider.NOTION);
         integration.complete("encrypted-access-token", "encrypted-refresh-token", "Blocki Workspace", NOW);
-        when(integrationRepository.findByUserIdAndProvider(userId, IntegrationProvider.NOTION))
+        when(integrationRepository.findWithLockByUserIdAndProvider(userId, IntegrationProvider.NOTION))
                 .thenReturn(Optional.of(integration));
 
         IntegrationResult result = service.disconnect(userId, IntegrationProvider.NOTION);
@@ -329,12 +334,27 @@ class IntegrationServiceTest {
         assertThat(integration.getEncryptedAccessToken()).isNull();
         assertThat(integration.getEncryptedRefreshToken()).isNull();
         verify(integrationRepository).save(integration);
+        verifyNoInteractions(documentGenerationAutomationService);
+    }
+
+    @Test
+    void disconnecting_github_disables_document_generation_automation() {
+        UUID userId = UUID.randomUUID();
+        Integration integration = Integration.connecting(userId, IntegrationProvider.GITHUB);
+        integration.complete("encrypted-access-token", null, null, NOW);
+        when(integrationRepository.findWithLockByUserIdAndProvider(userId, IntegrationProvider.GITHUB))
+                .thenReturn(Optional.of(integration));
+
+        service.disconnect(userId, IntegrationProvider.GITHUB);
+
+        verify(documentGenerationAutomationService).disableForGithubDisconnect(userId);
+        verify(integrationRepository).save(integration);
     }
 
     @Test
     void disconnecting_an_absent_provider_returns_not_connected() {
         UUID userId = UUID.randomUUID();
-        when(integrationRepository.findByUserIdAndProvider(userId, IntegrationProvider.GITHUB))
+        when(integrationRepository.findWithLockByUserIdAndProvider(userId, IntegrationProvider.GITHUB))
                 .thenReturn(Optional.empty());
 
         IntegrationResult result = service.disconnect(userId, IntegrationProvider.GITHUB);
@@ -346,6 +366,7 @@ class IntegrationServiceTest {
                 null,
                 null));
         verify(integrationRepository, never()).save(org.mockito.ArgumentMatchers.any());
+        verify(documentGenerationAutomationService).disableForGithubDisconnect(userId);
     }
 
     @Test

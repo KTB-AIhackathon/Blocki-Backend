@@ -1,5 +1,6 @@
 package com.blocki.blocki_backend.integration.service;
 
+import com.blocki.blocki_backend.document.service.DocumentGenerationAutomationService;
 import com.blocki.blocki_backend.integration.client.github.GithubOAuthClient;
 import com.blocki.blocki_backend.integration.client.github.GithubOAuthClientException;
 import com.blocki.blocki_backend.integration.client.github.GithubTokenResponse;
@@ -33,6 +34,7 @@ public class IntegrationService implements IntegrationTokenProvider, NotionDashb
     private final GithubOAuthClient githubOAuthClient;
     private final OAuthStateGenerator stateGenerator;
     private final TokenEncryptor tokenEncryptor;
+    private final DocumentGenerationAutomationService documentGenerationAutomationService;
     private final Clock clock;
 
     public IntegrationService(
@@ -42,6 +44,7 @@ public class IntegrationService implements IntegrationTokenProvider, NotionDashb
             GithubOAuthClient githubOAuthClient,
             OAuthStateGenerator stateGenerator,
             TokenEncryptor tokenEncryptor,
+            DocumentGenerationAutomationService documentGenerationAutomationService,
             Clock clock) {
         this.integrationRepository = integrationRepository;
         this.oauthStateRepository = oauthStateRepository;
@@ -49,6 +52,7 @@ public class IntegrationService implements IntegrationTokenProvider, NotionDashb
         this.githubOAuthClient = githubOAuthClient;
         this.stateGenerator = stateGenerator;
         this.tokenEncryptor = tokenEncryptor;
+        this.documentGenerationAutomationService = documentGenerationAutomationService;
         this.clock = clock;
     }
 
@@ -142,13 +146,17 @@ public class IntegrationService implements IntegrationTokenProvider, NotionDashb
 
     @Transactional
     public IntegrationResult disconnect(UUID userId, IntegrationProvider provider) {
-        return integrationRepository.findByUserIdAndProvider(userId, provider)
+        IntegrationResult result = integrationRepository.findWithLockByUserIdAndProvider(userId, provider)
                 .map(integration -> {
                     integration.disconnect();
                     integrationRepository.save(integration);
                     return toResult(integration);
                 })
                 .orElseGet(() -> notConnected(provider));
+        if (provider == IntegrationProvider.GITHUB) {
+            documentGenerationAutomationService.disableForGithubDisconnect(userId);
+        }
+        return result;
     }
 
     @Override
