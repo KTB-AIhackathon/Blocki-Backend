@@ -12,6 +12,7 @@ import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 @Entity
@@ -65,7 +66,7 @@ public class DocumentGenerationAutomation {
         automation.userId = userId;
         automation.enabled = enabled;
         automation.scheduleDayOfWeek = scheduleDayOfWeek;
-        automation.scheduleTime = scheduleTime;
+        automation.scheduleTime = minuteOf(scheduleTime);
         automation.createdAt = now;
         automation.updatedAt = now;
         return automation;
@@ -78,8 +79,12 @@ public class DocumentGenerationAutomation {
 
     public void changeSchedule(DayOfWeek scheduleDayOfWeek, LocalTime scheduleTime, Instant updatedAt) {
         this.scheduleDayOfWeek = scheduleDayOfWeek;
-        this.scheduleTime = scheduleTime;
+        this.scheduleTime = minuteOf(scheduleTime);
         this.updatedAt = updatedAt;
+    }
+
+    private static LocalTime minuteOf(LocalTime scheduleTime) {
+        return scheduleTime == null ? DEFAULT_SCHEDULE_TIME : scheduleTime.truncatedTo(ChronoUnit.MINUTES);
     }
 
     public UUID getUserId() {
@@ -95,6 +100,6 @@ public class DocumentGenerationAutomation {
     }
 
     public LocalTime getScheduleTime() {
-        return scheduleTime == null ? DEFAULT_SCHEDULE_TIME : scheduleTime;
+        return minuteOf(scheduleTime);
     }
 }

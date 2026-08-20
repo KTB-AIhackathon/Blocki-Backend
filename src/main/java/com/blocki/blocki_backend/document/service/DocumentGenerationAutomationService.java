@@ -14,15 +14,22 @@ import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class DocumentGenerationAutomationService {
+
+    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm");
+    private static final Logger log = LoggerFactory.getLogger(DocumentGenerationAutomationService.class);
 
     private final DocumentGenerationAutomationRepository automationRepository;
     private final IntegrationRepository integrationRepository;
@@ -72,6 +79,13 @@ public class DocumentGenerationAutomationService {
         automation.changeSchedule(schedule.dayOfWeek(), schedule.time(), now);
         automation.changeEnabled(enabled, now);
         automationRepository.save(automation);
+        log.info(
+                "automation schedule saved uuid=- ts={} userId={} enabled={} day={} time={}",
+                now,
+                userId,
+                enabled,
+                schedule.dayOfWeek(),
+                schedule.time().format(CLOCK));
         return DocumentGenerationAutomationResponse.of(automation);
     }
 
@@ -85,9 +99,10 @@ public class DocumentGenerationAutomationService {
 
     @Transactional(readOnly = true)
     public List<UUID> findEnabledUserIds(DayOfWeek dayOfWeek, LocalTime time) {
+        LocalTime minute = minuteOf(time);
         return automationRepository.findByEnabledTrue().stream()
                 .filter(automation -> automation.getScheduleDayOfWeek() == dayOfWeek)
-                .filter(automation -> automation.getScheduleTime().equals(time))
+                .filter(automation -> minuteOf(automation.getScheduleTime()).equals(minute))
                 .map(DocumentGenerationAutomation::getUserId)
                 .toList();
     }
@@ -117,10 +132,14 @@ public class DocumentGenerationAutomationService {
         try {
             return new ScheduleValues(
                     DayOfWeek.valueOf(requestedSchedule.dayOfWeek()),
-                    LocalTime.parse(requestedSchedule.time()));
+                    minuteOf(LocalTime.parse(requestedSchedule.time())));
         } catch (IllegalArgumentException | DateTimeParseException exception) {
             throw new BusinessException(ErrorCode.INVALID_PARAMETER);
         }
+    }
+
+    private static LocalTime minuteOf(LocalTime time) {
+        return time == null ? LocalTime.of(21, 0) : time.truncatedTo(ChronoUnit.MINUTES);
     }
 
     private record ScheduleValues(DayOfWeek dayOfWeek, LocalTime time) {

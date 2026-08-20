@@ -127,4 +127,21 @@ class DocumentGenerationAutomationSchedulerTest {
         verify(documentGenerationService).request(nextUserId, DocumentType.RESUME, RESUME_KEY);
         verify(documentGenerationService).request(nextUserId, DocumentType.PORTFOLIO, PORTFOLIO_KEY);
     }
+
+    @Test
+    void queues_when_the_saved_minute_matches_the_current_kst_clock() {
+        UUID userId = UUID.randomUUID();
+        DocumentGenerationAutomationScheduler minuteScheduler = new DocumentGenerationAutomationScheduler(
+                automationService,
+                documentGenerationService,
+                Clock.fixed(Instant.parse("2026-08-24T12:20:00Z"), ZoneOffset.UTC));
+        when(automationService.findEnabledUserIds(DayOfWeek.MONDAY, LocalTime.of(21, 20)))
+                .thenReturn(List.of(userId));
+        when(automationService.isGithubConnected(userId)).thenReturn(true);
+
+        minuteScheduler.runWeeklyDocumentGeneration();
+
+        verify(documentGenerationService).request(userId, DocumentType.RESUME, RESUME_KEY);
+        verify(documentGenerationService).request(userId, DocumentType.PORTFOLIO, PORTFOLIO_KEY);
+    }
 }

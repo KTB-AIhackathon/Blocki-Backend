@@ -145,4 +145,20 @@ class DocumentGenerationAutomationServiceTest {
         assertThat(service.findEnabledUserIds(DayOfWeek.WEDNESDAY, LocalTime.of(21, 30)))
                 .containsExactly(matchingUserId);
     }
+
+    @Test
+    void matches_the_same_minute_and_ignores_seconds() {
+        UUID matchingUserId = UUID.randomUUID();
+        UUID sameHourUserId = UUID.randomUUID();
+        when(automationRepository.findByEnabledTrue()).thenReturn(List.of(
+                DocumentGenerationAutomation.create(
+                        matchingUserId, true, DayOfWeek.FRIDAY, LocalTime.of(1, 20, 45), NOW),
+                DocumentGenerationAutomation.create(
+                        sameHourUserId, true, DayOfWeek.FRIDAY, LocalTime.of(1, 0), NOW)));
+
+        assertThat(service.findEnabledUserIds(DayOfWeek.FRIDAY, LocalTime.of(1, 20)))
+                .containsExactly(matchingUserId);
+        assertThat(service.findEnabledUserIds(DayOfWeek.FRIDAY, LocalTime.of(1, 0)))
+                .containsExactly(sameHourUserId);
+    }
 }
