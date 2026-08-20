@@ -22,11 +22,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 
 public class IntegrationService implements IntegrationTokenProvider, NotionDashboardStore {
 
     private static final Duration OAUTH_STATE_TTL = Duration.ofMinutes(10);
+    private static final Logger log = LoggerFactory.getLogger(IntegrationService.class);
 
     private final IntegrationRepository integrationRepository;
     private final OAuthStateRepository oauthStateRepository;
@@ -153,6 +156,11 @@ public class IntegrationService implements IntegrationTokenProvider, NotionDashb
                     return toResult(integration);
                 })
                 .orElseGet(() -> notConnected(provider));
+        log.info(
+                "integration disconnected uuid=- ts={} userId={} provider={}",
+                clock.instant(),
+                userId,
+                provider);
         if (provider == IntegrationProvider.GITHUB) {
             documentGenerationAutomationService.disableForGithubDisconnect(userId);
         }

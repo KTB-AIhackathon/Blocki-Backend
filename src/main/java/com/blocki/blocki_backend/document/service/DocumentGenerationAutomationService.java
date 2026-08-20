@@ -118,7 +118,13 @@ public class DocumentGenerationAutomationService {
     private void requireConnectedGithub(UUID userId) {
         integrationRepository.findWithLockByUserIdAndProvider(userId, IntegrationProvider.GITHUB)
                 .filter(integration -> integration.getStatus() == IntegrationStatus.CONNECTED)
-                .orElseThrow(() -> new BusinessException(ErrorCode.GITHUB_INTEGRATION_REQUIRED));
+                .orElseThrow(() -> {
+                    log.info(
+                            "automation enable rejected uuid=- ts={} userId={} reason=github_required",
+                            clock.instant(),
+                            userId);
+                    return new BusinessException(ErrorCode.GITHUB_INTEGRATION_REQUIRED);
+                });
     }
 
     private ScheduleValues resolveSchedule(
