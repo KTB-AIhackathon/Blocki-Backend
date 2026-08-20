@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -39,6 +40,13 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(AccessDeniedException.class)
 	public ResponseEntity<ErrorResponse> handleAccessDeniedException(AccessDeniedException e) {
 		ErrorCode errorCode = ErrorCode.FORBIDDEN;
+		return ResponseEntity.status(errorCode.getStatus())
+				.body(ErrorResponse.of(errorCode, errorCode.getDefaultMessage()));
+	}
+
+	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+	public ResponseEntity<ErrorResponse> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+		ErrorCode errorCode = ErrorCode.METHOD_NOT_ALLOWED;
 		return ResponseEntity.status(errorCode.getStatus())
 				.body(ErrorResponse.of(errorCode, errorCode.getDefaultMessage()));
 	}

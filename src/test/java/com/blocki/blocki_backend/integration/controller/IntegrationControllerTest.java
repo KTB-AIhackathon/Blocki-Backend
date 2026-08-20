@@ -104,15 +104,42 @@ class IntegrationControllerTest {
                 IntegrationProvider.NOTION, "authorization-code", "opaque-state")).thenReturn(userId);
         when(integrationService.findAccessToken(userId, IntegrationProvider.NOTION))
                 .thenReturn(Optional.of("notion-token"));
+        when(integrationService.findNotionDashboardPageId(userId)).thenReturn(Optional.of("dash-1"));
         mockMvc = MockMvcBuilders.standaloneSetup(new IntegrationController(
                 integrationService, currentUserIdResolver, frontendProperties, hooks)).build();
 
         mockMvc.perform(get("/api/v1/integrations/notion/callback")
                         .queryParam("code", "authorization-code")
                         .queryParam("state", "opaque-state"))
-                .andExpect(status().isFound());
+                .andExpect(status().isFound())
+                .andExpect(header().string(
+                        "Location",
+                        "http://localhost:5173/oauth/callback?provider=notion&result=success"));
 
         verify(hook).afterNotionConnected(userId, "notion-token");
+    }
+
+    @Test
+    void warns_when_notion_connects_but_the_dashboard_was_not_created() throws Exception {
+        NotionConnectHook hook = org.mockito.Mockito.mock(NotionConnectHook.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<NotionConnectHook> hooks = org.mockito.Mockito.mock(ObjectProvider.class);
+        when(hooks.getIfAvailable()).thenReturn(hook);
+        when(integrationService.completeAuthorization(
+                IntegrationProvider.NOTION, "authorization-code", "opaque-state")).thenReturn(userId);
+        when(integrationService.findAccessToken(userId, IntegrationProvider.NOTION))
+                .thenReturn(Optional.of("notion-token"));
+        when(integrationService.findNotionDashboardPageId(userId)).thenReturn(Optional.empty());
+        mockMvc = MockMvcBuilders.standaloneSetup(new IntegrationController(
+                integrationService, currentUserIdResolver, frontendProperties, hooks)).build();
+
+        mockMvc.perform(get("/api/v1/integrations/notion/callback")
+                        .queryParam("code", "authorization-code")
+                        .queryParam("state", "opaque-state"))
+                .andExpect(status().isFound())
+                .andExpect(header().string(
+                        "Location",
+                        "http://localhost:5173/oauth/callback?provider=notion&result=success&error=NOTION_PAGE_ACCESS"));
     }
 
     @Test

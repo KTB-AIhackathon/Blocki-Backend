@@ -11,6 +11,7 @@ import com.blocki.blocki_backend.integration.service.NotionConnectHook;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +34,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 @RequestMapping("/api/v1/integrations")
 @ConditionalOnBean({CurrentUserIdResolver.class, IntegrationService.class})
 public class IntegrationController {
+
+    static final String NOTION_PAGE_ACCESS = "NOTION_PAGE_ACCESS";
 
     private static final Logger log = LoggerFactory.getLogger(IntegrationController.class);
 
@@ -92,8 +95,7 @@ public class IntegrationController {
                 return workspaceRedirect(provider, "failed", IntegrationException.OAUTH_AUTHORIZATION_DENIED);
             }
             UUID userId = integrationService.completeAuthorization(integrationProvider, code, state);
-            provisionNotionDashboard(integrationProvider, userId);
-            return workspaceRedirect(provider, "success", null);
+            return workspaceRedirect(provider, "success", provisionNotionDashboard(integrationProvider, userId));
         } catch (IntegrationException exception) {
             return workspaceRedirect(provider, "failed", exception.getCode());
         }
@@ -109,21 +111,24 @@ public class IntegrationController {
         return ResponseEntity.status(status).body(ErrorResponse.of(exception.getCode(), messageFor(exception.getCode())));
     }
 
-    private void provisionNotionDashboard(IntegrationProvider provider, UUID userId) {
+    private String provisionNotionDashboard(IntegrationProvider provider, UUID userId) {
         if (provider != IntegrationProvider.NOTION || userId == null) {
-            return;
+            return null;
         }
         NotionConnectHook hook = notionConnectHook.getIfAvailable();
-        if (hook == null) {
-            return;
+        if (hook != null) {
+            integrationService.findAccessToken(userId, IntegrationProvider.NOTION).ifPresent(token -> {
+                try {
+                    hook.afterNotionConnected(userId, token);
+                } catch (RuntimeException exception) {
+                    log.warn("Notion dashboard was not created during OAuth for user {}", userId, exception);
+                }
+            });
         }
-        integrationService.findAccessToken(userId, IntegrationProvider.NOTION).ifPresent(token -> {
-            try {
-                hook.afterNotionConnected(userId, token);
-            } catch (RuntimeException exception) {
-                log.warn("Notion dashboard was not created during OAuth for user {}", userId, exception);
-            }
-        });
+        String pageId = Optional.ofNullable(integrationService.findNotionDashboardPageId(userId))
+                .orElseGet(Optional::empty)
+                .orElse("");
+        return pageId.isBlank() ? NOTION_PAGE_ACCESS : null;
     }
 
     private IntegrationProvider parseProvider(String provider) {
