@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,9 @@ public class DocumentGenerationWorker {
     private final DocumentGenerationClient client;
     private final Clock clock;
 
+    // The second constructor exists only so tests can hold time still. Without
+    // this marker Spring sees two candidates and refuses to build the bean.
+    @Autowired
     public DocumentGenerationWorker(
             DocumentGenerationJobRepository jobRepository,
             DocumentGenerationClaimService claimService,

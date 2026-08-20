@@ -14,12 +14,15 @@ import com.blocki.blocki_backend.integration.entity.IntegrationStatus;
 import com.blocki.blocki_backend.integration.config.FrontendProperties;
 import com.blocki.blocki_backend.integration.service.IntegrationResult;
 import com.blocki.blocki_backend.integration.service.IntegrationService;
+import com.blocki.blocki_backend.integration.service.NotionConnectHook;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -33,8 +36,10 @@ class IntegrationControllerTest {
 
     @BeforeEach
     void setUp() {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<NotionConnectHook> hooks = org.mockito.Mockito.mock(ObjectProvider.class);
         mockMvc = MockMvcBuilders.standaloneSetup(new IntegrationController(
-                integrationService, currentUserIdResolver, frontendProperties)).build();
+                integrationService, currentUserIdResolver, frontendProperties, hooks)).build();
         when(currentUserIdResolver.resolve()).thenReturn(userId);
     }
 
@@ -87,6 +92,27 @@ class IntegrationControllerTest {
 
         verify(integrationService).completeAuthorization(
                 IntegrationProvider.NOTION, "authorization-code", "opaque-state");
+    }
+
+    @Test
+    void creates_the_notion_dashboard_after_a_successful_callback() throws Exception {
+        NotionConnectHook hook = org.mockito.Mockito.mock(NotionConnectHook.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<NotionConnectHook> hooks = org.mockito.Mockito.mock(ObjectProvider.class);
+        when(hooks.getIfAvailable()).thenReturn(hook);
+        when(integrationService.completeAuthorization(
+                IntegrationProvider.NOTION, "authorization-code", "opaque-state")).thenReturn(userId);
+        when(integrationService.findAccessToken(userId, IntegrationProvider.NOTION))
+                .thenReturn(Optional.of("notion-token"));
+        mockMvc = MockMvcBuilders.standaloneSetup(new IntegrationController(
+                integrationService, currentUserIdResolver, frontendProperties, hooks)).build();
+
+        mockMvc.perform(get("/api/v1/integrations/notion/callback")
+                        .queryParam("code", "authorization-code")
+                        .queryParam("state", "opaque-state"))
+                .andExpect(status().isFound());
+
+        verify(hook).afterNotionConnected(userId, "notion-token");
     }
 
     @Test

@@ -7,9 +7,14 @@ import com.blocki.blocki_backend.integration.entity.IntegrationProvider;
 import com.blocki.blocki_backend.integration.service.IntegrationException;
 import com.blocki.blocki_backend.integration.service.IntegrationResult;
 import com.blocki.blocki_backend.integration.service.IntegrationService;
+import com.blocki.blocki_backend.integration.service.NotionConnectHook;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,17 +34,22 @@ import org.springframework.web.util.UriComponentsBuilder;
 @ConditionalOnBean({CurrentUserIdResolver.class, IntegrationService.class})
 public class IntegrationController {
 
+    private static final Logger log = LoggerFactory.getLogger(IntegrationController.class);
+
     private final IntegrationService integrationService;
     private final CurrentUserIdResolver currentUserIdResolver;
     private final FrontendProperties frontendProperties;
+    private final ObjectProvider<NotionConnectHook> notionConnectHook;
 
     public IntegrationController(
             IntegrationService integrationService,
             CurrentUserIdResolver currentUserIdResolver,
-            FrontendProperties frontendProperties) {
+            FrontendProperties frontendProperties,
+            ObjectProvider<NotionConnectHook> notionConnectHook) {
         this.integrationService = integrationService;
         this.currentUserIdResolver = currentUserIdResolver;
         this.frontendProperties = frontendProperties;
+        this.notionConnectHook = notionConnectHook;
     }
 
     @GetMapping
@@ -81,7 +91,8 @@ public class IntegrationController {
                 integrationService.cancelAuthorization(integrationProvider, state);
                 return workspaceRedirect(provider, "failed", IntegrationException.OAUTH_AUTHORIZATION_DENIED);
             }
-            integrationService.completeAuthorization(integrationProvider, code, state);
+            UUID userId = integrationService.completeAuthorization(integrationProvider, code, state);
+            provisionNotionDashboard(integrationProvider, userId);
             return workspaceRedirect(provider, "success", null);
         } catch (IntegrationException exception) {
             return workspaceRedirect(provider, "failed", exception.getCode());
@@ -96,6 +107,23 @@ public class IntegrationController {
             default -> HttpStatus.BAD_REQUEST;
         };
         return ResponseEntity.status(status).body(ErrorResponse.of(exception.getCode(), messageFor(exception.getCode())));
+    }
+
+    private void provisionNotionDashboard(IntegrationProvider provider, UUID userId) {
+        if (provider != IntegrationProvider.NOTION || userId == null) {
+            return;
+        }
+        NotionConnectHook hook = notionConnectHook.getIfAvailable();
+        if (hook == null) {
+            return;
+        }
+        integrationService.findAccessToken(userId, IntegrationProvider.NOTION).ifPresent(token -> {
+            try {
+                hook.afterNotionConnected(userId, token);
+            } catch (RuntimeException exception) {
+                log.warn("Notion dashboard was not created during OAuth for user {}", userId, exception);
+            }
+        });
     }
 
     private IntegrationProvider parseProvider(String provider) {

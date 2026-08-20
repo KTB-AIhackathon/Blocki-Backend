@@ -104,6 +104,25 @@ class NotionOAuthClientTest {
                 .isInstanceOf(NotionOAuthClientException.class);
     }
 
+    @Test
+    void a_local_stack_can_stand_a_fake_identity_provider_in_front() {
+        NotionOAuthProperties properties = properties();
+        properties.setAuthorizeUri("http://localhost:9100/notion/v1/oauth/authorize");
+        properties.setTokenUri("http://oauth-provider:9100/notion/v1/oauth/token");
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer stub = MockRestServiceServer.bindTo(builder).build();
+        NotionOAuthClient local = new NotionOAuthClient(builder.build(), properties);
+        stub.expect(requestTo("http://oauth-provider:9100/notion/v1/oauth/token"))
+                .andRespond(withSuccess("""
+                        { "access_token": "stub-token", "token_type": "bearer", "workspace_name": "스텁" }
+                        """, APPLICATION_JSON));
+
+        assertThat(local.buildAuthorizeUri("s").toString())
+                .startsWith("http://localhost:9100/notion/v1/oauth/authorize?");
+        assertThat(local.exchangeCode("code").accessToken()).isEqualTo("stub-token");
+        stub.verify();
+    }
+
     private NotionOAuthProperties properties() {
         NotionOAuthProperties properties = new NotionOAuthProperties();
         properties.setClientId(CLIENT_ID);

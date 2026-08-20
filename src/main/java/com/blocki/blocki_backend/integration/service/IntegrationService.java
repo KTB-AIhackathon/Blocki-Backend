@@ -23,7 +23,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.transaction.annotation.Transactional;
 
-public class IntegrationService implements IntegrationTokenProvider {
+public class IntegrationService implements IntegrationTokenProvider, NotionDashboardStore {
 
     private static final Duration OAUTH_STATE_TTL = Duration.ofMinutes(10);
 
@@ -77,7 +77,7 @@ public class IntegrationService implements IntegrationTokenProvider {
     }
 
     @Transactional(noRollbackFor = IntegrationException.class)
-    public void completeAuthorization(IntegrationProvider provider, String code, String state) {
+    public UUID completeAuthorization(IntegrationProvider provider, String code, String state) {
         if (code == null || code.isBlank() || state == null || state.isBlank()) {
             throw new IntegrationException(IntegrationException.OAUTH_STATE_INVALID);
         }
@@ -102,6 +102,7 @@ public class IntegrationService implements IntegrationTokenProvider {
                     completion.accountLabel(),
                     now);
             integrationRepository.save(integration);
+            return oauthState.getUserId();
         } catch (NotionOAuthClientException | GithubOAuthClientException exception) {
             if (integration.getStatus() != IntegrationStatus.CONNECTED) {
                 integration.fail(IntegrationException.EXTERNAL_SOURCE_FAILED);
@@ -158,6 +159,24 @@ public class IntegrationService implements IntegrationTokenProvider {
                 .map(Integration::getEncryptedAccessToken)
                 .filter(accessToken -> !accessToken.isBlank())
                 .map(tokenEncryptor::decrypt);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<String> findNotionDashboardPageId(UUID userId) {
+        return integrationRepository.findByUserIdAndProvider(userId, IntegrationProvider.NOTION)
+                .map(Integration::getNotionDashboardPageId)
+                .filter(pageId -> !pageId.isBlank());
+    }
+
+    @Override
+    @Transactional
+    public void rememberNotionDashboardPageId(UUID userId, String pageId) {
+        integrationRepository.findByUserIdAndProvider(userId, IntegrationProvider.NOTION)
+                .ifPresent(integration -> {
+                    integration.rememberNotionDashboardPage(pageId);
+                    integrationRepository.save(integration);
+                });
     }
 
     private OAuthCompletion exchangeCode(IntegrationProvider provider, String code) {

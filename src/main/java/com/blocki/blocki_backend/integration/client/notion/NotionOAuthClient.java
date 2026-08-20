@@ -9,9 +9,6 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 public class NotionOAuthClient {
 
-    private static final String AUTHORIZE_URI = "https://api.notion.com/v1/oauth/authorize";
-    private static final String TOKEN_URI = "https://api.notion.com/v1/oauth/token";
-
     private final RestClient restClient;
     private final NotionOAuthProperties properties;
 
@@ -21,7 +18,7 @@ public class NotionOAuthClient {
     }
 
     public URI buildAuthorizeUri(String state) {
-        return UriComponentsBuilder.fromUriString(AUTHORIZE_URI)
+        return UriComponentsBuilder.fromUriString(properties.getAuthorizeUri())
                 .queryParam("client_id", properties.getClientId())
                 .queryParam("redirect_uri", properties.getRedirectUri())
                 .queryParam("owner", "user")
@@ -35,7 +32,7 @@ public class NotionOAuthClient {
     public NotionTokenResponse exchangeCode(String code) {
         try {
             return restClient.post()
-                    .uri(TOKEN_URI)
+                    .uri(properties.getTokenUri())
                     .headers(headers -> headers.setBasicAuth(properties.getClientId(), properties.getClientSecret()))
                     .body(Map.of(
                             "grant_type", "authorization_code",

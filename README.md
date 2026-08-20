@@ -65,6 +65,9 @@ docker compose up -d
 | `DB_USERNAME` | `blocki` | |
 | `DB_PASSWORD` | `blocki` | |
 | `JWT_SECRET` | (개발용 기본값, 배포 시 반드시 교체) | access token 서명 키, HS256 기준 최소 32바이트 |
+| `AI_BASE_URL` | 없음 | Blocki-AI 워커 주소. `AI_INTERNAL_KEY`와 **둘 다** 있어야 문서 생성이 켜진다 |
+| `AI_INTERNAL_KEY` | 없음 | 워커의 `INTERNAL_API_KEY`와 같은 값 |
+| `AI_TIMEOUT_SECONDS` | `180` | 저장소를 훑고 LLM을 호출하는 시간. 짧으면 워커가 멀쩡해도 job이 읽기 타임아웃으로 죽는다 |
 
 로컬에서 기본값과 다른 값을 쓰고 싶다면 `.env.example`을 `.env`로 복사해 값을 채우세요
 (`.env`는 `.gitignore`에 등록되어 있어 커밋되지 않습니다). JWT 비밀키는 아래처럼 생성할 수 있습니다.
@@ -75,6 +78,13 @@ openssl rand -base64 64
 
 배포 환경(AWS EC2/RDS)의 실제 값은 GitHub Actions Secrets 또는 서버 환경변수로만 주입하고, 어떤 경우에도
 git에 커밋하지 않습니다.
+
+전체 스택(프론트·AI·이 서버·로컬 스텁)은 워크스페이스 루트에서 띄운다.
+
+```bash
+./up.sh
+python3 e2e/run_stack.py
+```
 
 ### 4. 서버 실행
 
@@ -91,3 +101,28 @@ curl -X POST http://localhost:8080/api/v1/auth/sign-up \
 ```
 
 API 상세 스펙은 `docs/api-specification.md`, 패키지 구조는 `docs/backend-directory-structure.md`를 참고하세요.
+
+## 문서 생성 (Blocki-AI 연동)
+
+`AI_BASE_URL`과 `AI_INTERNAL_KEY`가 모두 있으면 `DocumentGenerationWorker`가 큐를 돌며
+워커의 `POST /internal/jobs`를 호출합니다.
+
+- **GitHub** — 연결돼 있으면 복호화한 access token을 `X-GitHub-Pat` 헤더로 넘깁니다.
+  요청에 저장소 목록을 싣지 않으므로 워커가 사용자의 저장소를 직접 찾습니다.
+- **Notion** — 연결돼 있으면 `X-Notion-Token` 헤더와 함께, 글이 들어갈 페이지를
+  `notion.parent_id`로 지정합니다.
+
+### Notion 대시보드
+
+워커는 "Developer TIL Dashboard" 한 페이지와 그 자손에만 씁니다. 그 페이지를 찾거나
+만드는 일은 `NotionDashboardResolver`가 job 직전에 워커의
+`POST /internal/notion/dashboard`를 호출해 처리하고, 받은 `page_id`를
+`integrations.notion_dashboard_page_id`에 남깁니다. OAuth 콜백 시점이 아니라 필요할 때
+해결하므로, 콜백 당시 워커가 죽어 있었다고 해서 그 계정이 영영 발행 불가가 되지 않습니다.
+
+이 id는 OAuth의 `workspace_id`가 아닙니다. 워크스페이스는 페이지가 아니고, 워커는
+대시보드가 아닌 부모를 거부합니다. 연결을 해제해도 이 값은 지우지 않습니다 —
+사용자의 페이지는 그대로 두고, 재연결 시 같은 곳을 다시 찾게 하기 위해서입니다.
+
+Notion은 전 구간에서 선택 사항입니다. 미연결·워커 장애·대시보드 해결 실패 어느 경우에도
+문서 생성과 버전 저장은 그대로 성공합니다.

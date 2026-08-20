@@ -32,6 +32,23 @@ jwt:
 frontend:
   origin: ${FRONTEND_ORIGIN:http://localhost:5173}
 
+github:
+  client-id: ${GITHUB_CLIENT_ID:}
+  client-secret: ${GITHUB_CLIENT_SECRET:}
+  redirect-uri: ${GITHUB_REDIRECT_URI:http://localhost:8080/api/v1/integrations/github/callback}
+  scope: ${GITHUB_SCOPE:read:user}
+  authorize-uri: ${GITHUB_AUTHORIZE_URI:https://github.com/login/oauth/authorize}
+  token-uri: ${GITHUB_TOKEN_URI:https://github.com/login/oauth/access_token}
+
+notion:
+  client-id: ${NOTION_CLIENT_ID:}
+  client-secret: ${NOTION_CLIENT_SECRET:}
+  redirect-uri: ${NOTION_REDIRECT_URI:http://localhost:8080/api/v1/integrations/notion/callback}
+  authorize-uri: ${NOTION_AUTHORIZE_URI:https://api.notion.com/v1/oauth/authorize}
+  token-uri: ${NOTION_TOKEN_URI:https://api.notion.com/v1/oauth/token}
+
 # Blocki-AI는 AI_BASE_URL과 AI_INTERNAL_KEY가 모두 설정된 환경에서만 활성화된다.
+# 문서 생성은 GitHub 저장소를 훑고 LLM을 호출하므로 분 단위로 걸린다.
+# 이 값이 짧으면 워커가 정상 동작해도 읽기 타임아웃으로 job이 실패한다.
 ai:
-  timeout-seconds: ${AI_TIMEOUT_SECONDS:30}
+  timeout-seconds: ${AI_TIMEOUT_SECONDS:180}

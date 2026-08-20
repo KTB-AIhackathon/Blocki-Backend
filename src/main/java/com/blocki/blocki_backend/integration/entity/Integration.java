@@ -50,6 +50,15 @@ public class Integration {
     @Column(name = "error_code", length = 100)
     private String errorCode;
 
+    /**
+     * The Developer TIL Dashboard page the AI worker writes under, for NOTION rows.
+     *
+     * <p>Deliberately not the OAuth {@code workspace_id}: a workspace is not a page,
+     * and the worker refuses any parent that is not this dashboard.
+     */
+    @Column(name = "notion_dashboard_page_id", length = 100)
+    private String notionDashboardPageId;
+
     protected Integration() {
     }
 
@@ -86,6 +95,10 @@ public class Integration {
         this.errorCode = errorCode;
     }
 
+    /**
+     * Disconnecting forgets our access, not the user's page. Reconnecting later
+     * finds the same dashboard instead of leaving a second one behind.
+     */
     public void disconnect() {
         this.encryptedAccessToken = null;
         this.encryptedRefreshToken = null;
@@ -93,6 +106,10 @@ public class Integration {
         this.connectedAt = null;
         this.status = IntegrationStatus.NOT_CONNECTED;
         this.errorCode = null;
+    }
+
+    public void rememberNotionDashboardPage(String pageId) {
+        this.notionDashboardPageId = pageId;
     }
 
     public IntegrationProvider getProvider() {
@@ -125,5 +142,9 @@ public class Integration {
 
     public String getErrorCode() {
         return errorCode;
+    }
+
+    public String getNotionDashboardPageId() {
+        return notionDashboardPageId;
     }
 }

@@ -62,6 +62,25 @@ class GithubOAuthClientTest {
         server.verify();
     }
 
+    @Test
+    void a_local_stack_can_stand_a_fake_identity_provider_in_front() {
+        GithubOAuthProperties properties = properties();
+        properties.setAuthorizeUri("http://localhost:9100/github/login/oauth/authorize");
+        properties.setTokenUri("http://oauth-provider:9100/github/login/oauth/access_token");
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer stub = MockRestServiceServer.bindTo(builder).build();
+        GithubOAuthClient local = new GithubOAuthClient(builder.build(), properties);
+        stub.expect(requestTo("http://oauth-provider:9100/github/login/oauth/access_token"))
+                .andRespond(withSuccess("""
+                        { "access_token": "stub-token", "token_type": "bearer" }
+                        """, APPLICATION_JSON));
+
+        assertThat(local.buildAuthorizeUri("s").toString())
+                .startsWith("http://localhost:9100/github/login/oauth/authorize?");
+        assertThat(local.exchangeCode("code").accessToken()).isEqualTo("stub-token");
+        stub.verify();
+    }
+
     private GithubOAuthProperties properties() {
         GithubOAuthProperties properties = new GithubOAuthProperties();
         properties.setClientId("client-id");

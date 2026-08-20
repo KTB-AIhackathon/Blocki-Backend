@@ -12,6 +12,30 @@ public class GithubOAuthProperties {
     private String redirectUri;
     private String scope = "read:user";
 
+    /**
+     * GitHub's own endpoints, overridable so a local stack can stand a fake
+     * identity provider in front of the real browser flow. Nothing but tests and
+     * local development should ever set these.
+     */
+    private String authorizeUri = "https://github.com/login/oauth/authorize";
+    private String tokenUri = "https://github.com/login/oauth/access_token";
+
+    public String getAuthorizeUri() {
+        return authorizeUri;
+    }
+
+    public void setAuthorizeUri(String authorizeUri) {
+        this.authorizeUri = authorizeUri;
+    }
+
+    public String getTokenUri() {
+        return tokenUri;
+    }
+
+    public void setTokenUri(String tokenUri) {
+        this.tokenUri = tokenUri;
+    }
+
     public String getClientId() {
         return clientId;
     }

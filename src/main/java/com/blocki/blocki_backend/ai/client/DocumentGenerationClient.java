@@ -1,6 +1,7 @@
 package com.blocki.blocki_backend.ai.client;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.blocki.blocki_backend.ai.config.AiProperties;
 import com.blocki.blocki_backend.document.entity.DocumentGenerationJob;
@@ -21,6 +22,7 @@ public class DocumentGenerationClient {
     private final RestClient restClient;
     private final AiProperties properties;
     private final IntegrationTokenProvider integrationTokenProvider;
+    private final NotionDashboardResolver notionDashboardResolver;
     private final UserRepository userRepository;
     private final JsonMapper jsonMapper;
 
@@ -28,11 +30,13 @@ public class DocumentGenerationClient {
             RestClient restClient,
             AiProperties properties,
             IntegrationTokenProvider integrationTokenProvider,
+            NotionDashboardResolver notionDashboardResolver,
             UserRepository userRepository,
             JsonMapper jsonMapper) {
         this.restClient = restClient;
         this.properties = properties;
         this.integrationTokenProvider = integrationTokenProvider;
+        this.notionDashboardResolver = notionDashboardResolver;
         this.userRepository = userRepository;
         this.jsonMapper = jsonMapper;
     }
@@ -43,6 +47,7 @@ public class DocumentGenerationClient {
                 .header("X-Internal-Key", properties.getInternalKey());
         integrationTokenProvider.findAccessToken(job.getUserId(), IntegrationProvider.GITHUB)
                 .ifPresent(token -> request.header("X-GitHub-Pat", token));
+        InternalNotionTarget notionTarget = notionTarget(job.getUserId(), request);
         User user = userRepository.findById(job.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("Document generation user does not exist"));
         String responseBody;
@@ -53,7 +58,8 @@ public class DocumentGenerationClient {
                             "profile_document",
                             new InternalDocument(
                                     job.getDocumentType().name().toLowerCase(),
-                                    profileFields(user))))
+                                    profileFields(user)),
+                            notionTarget))
                     .retrieve().body(String.class);
         } catch (RestClientResponseException exception) {
             throw InternalAiClientException.fromResponse(exception);
@@ -61,6 +67,22 @@ public class DocumentGenerationClient {
             throw InternalAiClientException.transport(exception);
         }
         return toResult(responseBody);
+    }
+
+    /**
+     * Attaches the user's Notion credentials, or leaves them off so the worker
+     * skips publishing. Notion is a side effect of generation, never a condition
+     * of it: an unconnected or unreachable Notion still yields a document.
+     */
+    private InternalNotionTarget notionTarget(java.util.UUID userId, RestClient.RequestBodySpec request) {
+        String notionToken = notionDashboardResolver.findAccessToken(userId).orElse(null);
+        if (notionToken == null) {
+            return null;
+        }
+        request.header("X-Notion-Token", notionToken);
+        return notionDashboardResolver.resolveParentPageId(userId, notionToken)
+                .map(InternalNotionTarget::new)
+                .orElse(null);
     }
 
     private Result toResult(String responseBody) {
@@ -107,11 +129,16 @@ public class DocumentGenerationClient {
         return new ProfileFields(user.getName(), "", "", "");
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private record InternalJobRequest(
             @JsonProperty("job_id") String jobId,
             @JsonProperty("user_id") String userId,
             @JsonProperty("job_type") String jobType,
-            @JsonProperty("document") InternalDocument document) {
+            @JsonProperty("document") InternalDocument document,
+            @JsonProperty("notion") InternalNotionTarget notion) {
+    }
+
+    private record InternalNotionTarget(@JsonProperty("parent_id") String parentId) {
     }
 
     private record InternalDocument(

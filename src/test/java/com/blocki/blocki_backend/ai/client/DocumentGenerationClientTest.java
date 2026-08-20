@@ -7,6 +7,8 @@ import static org.springframework.http.HttpHeaders.CONTENT_TYPE;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -31,7 +33,12 @@ import tools.jackson.databind.json.JsonMapper;
 
 class DocumentGenerationClientTest {
 
+    private static final String PROPOSED = """
+            { "ok": true, "status": "proposed", "artifact": { "kind": "resume", "title": "이력서", "body_markdown": "# 문서" }, "missing_sources": [] }
+            """;
+
     private final IntegrationTokenProvider integrationTokenProvider = Mockito.mock(IntegrationTokenProvider.class);
+    private final NotionDashboardResolver notionDashboardResolver = Mockito.mock(NotionDashboardResolver.class);
     private final UserRepository userRepository = Mockito.mock(UserRepository.class);
     private MockRestServiceServer server;
     private DocumentGenerationClient client;
@@ -42,8 +49,14 @@ class DocumentGenerationClientTest {
         server = MockRestServiceServer.bindTo(builder).build();
         AiProperties properties = new AiProperties();
         properties.setInternalKey("internal-key");
+        when(notionDashboardResolver.findAccessToken(Mockito.any())).thenReturn(Optional.empty());
         client = new DocumentGenerationClient(
-                builder.build(), properties, integrationTokenProvider, userRepository, new JsonMapper());
+                builder.build(),
+                properties,
+                integrationTokenProvider,
+                notionDashboardResolver,
+                userRepository,
+                new JsonMapper());
     }
 
     @Test
@@ -85,6 +98,49 @@ class DocumentGenerationClientTest {
         DocumentGenerationClient.Result result = client.generate(job);
 
         assertThat(result.markdown()).isEqualTo("# 문서");
+        server.verify();
+    }
+
+    @Test
+    void a_connected_notion_account_sends_its_token_and_the_dashboard_to_write_under() {
+        DocumentGenerationJob job = job();
+        when(notionDashboardResolver.findAccessToken(job.getUserId())).thenReturn(Optional.of("notion-token"));
+        when(notionDashboardResolver.resolveParentPageId(job.getUserId(), "notion-token"))
+                .thenReturn(Optional.of("dashboard-page"));
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andExpect(header("X-Notion-Token", "notion-token"))
+                .andExpect(content().json("""
+                        { "notion": { "parent_id": "dashboard-page" } }
+                        """))
+                .andRespond(withSuccess(PROPOSED, APPLICATION_JSON));
+
+        assertThat(client.generate(job).markdown()).isEqualTo("# 문서");
+        server.verify();
+    }
+
+    @Test
+    void an_account_without_notion_asks_for_no_publishing_at_all() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andExpect(headerDoesNotExist("X-Notion-Token"))
+                .andExpect(jsonPath("$.notion").doesNotExist())
+                .andRespond(withSuccess(PROPOSED, APPLICATION_JSON));
+
+        assertThat(client.generate(job()).markdown()).isEqualTo("# 문서");
+        server.verify();
+    }
+
+    @Test
+    void an_unreachable_dashboard_still_generates_the_document() {
+        DocumentGenerationJob job = job();
+        when(notionDashboardResolver.findAccessToken(job.getUserId())).thenReturn(Optional.of("notion-token"));
+        when(notionDashboardResolver.resolveParentPageId(job.getUserId(), "notion-token"))
+                .thenReturn(Optional.empty());
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andExpect(header("X-Notion-Token", "notion-token"))
+                .andExpect(jsonPath("$.notion").doesNotExist())
+                .andRespond(withSuccess(PROPOSED, APPLICATION_JSON));
+
+        assertThat(client.generate(job).markdown()).isEqualTo("# 문서");
         server.verify();
     }
 

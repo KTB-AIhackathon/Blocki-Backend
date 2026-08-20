@@ -11,6 +11,30 @@ public class NotionOAuthProperties {
     private String clientSecret;
     private String redirectUri;
 
+    /**
+     * Notion's own endpoints, overridable so a local stack can stand a fake
+     * identity provider in front of the real browser flow. Nothing but tests and
+     * local development should ever set these.
+     */
+    private String authorizeUri = "https://api.notion.com/v1/oauth/authorize";
+    private String tokenUri = "https://api.notion.com/v1/oauth/token";
+
+    public String getAuthorizeUri() {
+        return authorizeUri;
+    }
+
+    public void setAuthorizeUri(String authorizeUri) {
+        this.authorizeUri = authorizeUri;
+    }
+
+    public String getTokenUri() {
+        return tokenUri;
+    }
+
+    public void setTokenUri(String tokenUri) {
+        this.tokenUri = tokenUri;
+    }
+
     public String getClientId() {
         return clientId;
     }
