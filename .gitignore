@@ -38,3 +38,6 @@ out/
 
 # 로컬 환경변수 (실제 비밀값 포함, 커밋 금지)
 .env
+.env.*
+!.env.example
+env
