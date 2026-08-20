@@ -105,6 +105,7 @@ public class DocumentGenerationClient {
         if (!missingSources.stream().allMatch("GITHUB"::equals)) {
             throw new IllegalArgumentException("AI response has unsupported missing source");
         }
+        NotionPublish notion = NotionPublish.from(response.notion());
         if (!response.ok()) {
             if (!"failed".equals(response.status()) || isBlank(response.errorCode())) {
                 throw new IllegalArgumentException("AI failure response is invalid");
@@ -115,7 +116,8 @@ public class DocumentGenerationClient {
                     null,
                     missingSources,
                     response.errorCode(),
-                    response.error() != null && Boolean.TRUE.equals(response.error().retryable()));
+                    response.error() != null && Boolean.TRUE.equals(response.error().retryable()),
+                    notion);
         }
         if (!Set.of("proposed", "partial", "no_change").contains(response.status())
                 || response.artifact() == null
@@ -124,7 +126,8 @@ public class DocumentGenerationClient {
                 || isBlank(response.artifact().bodyMarkdown())) {
             throw new IllegalArgumentException("AI success response is invalid");
         }
-        return new Result(true, response.status(), response.artifact().bodyMarkdown(), missingSources, null, false);
+        return new Result(
+                true, response.status(), response.artifact().bodyMarkdown(), missingSources, null, false, notion);
     }
 
     private static boolean isBlank(String value) {
@@ -166,6 +169,15 @@ public class DocumentGenerationClient {
             @JsonProperty("artifact") InternalArtifact artifact,
             @JsonProperty("missing_sources") List<String> missingSources,
             @JsonProperty("error_code") String errorCode,
+            @JsonProperty("error") InternalError error,
+            @JsonProperty("notion") InternalNotion notion) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record InternalNotion(
+            @JsonProperty("ok") Boolean ok,
+            @JsonProperty("page_id") String pageId,
+            @JsonProperty("skipped_reason") String skippedReason,
             @JsonProperty("error") InternalError error) {
     }
 
@@ -188,9 +200,46 @@ public class DocumentGenerationClient {
             String markdown,
             List<String> missingSources,
             String errorCode,
-            boolean retryable) {
+            boolean retryable,
+            NotionPublish notion) {
         public Result(boolean ok, String status, String markdown, List<String> missingSources, String errorCode) {
-            this(ok, status, markdown, missingSources, errorCode, false);
+            this(ok, status, markdown, missingSources, errorCode, false, NotionPublish.none());
+        }
+
+        public Result(
+                boolean ok,
+                String status,
+                String markdown,
+                List<String> missingSources,
+                String errorCode,
+                boolean retryable) {
+            this(ok, status, markdown, missingSources, errorCode, retryable, NotionPublish.none());
+        }
+    }
+
+    public record NotionPublish(String status, String pageId, String detail) {
+        public static NotionPublish none() {
+            return new NotionPublish("none", "", "");
+        }
+
+        static NotionPublish from(InternalNotion notion) {
+            if (notion == null) {
+                return none();
+            }
+            if (Boolean.TRUE.equals(notion.ok())) {
+                return new NotionPublish("ok", blankToEmpty(notion.pageId()), "");
+            }
+            if (notion.skippedReason() != null && !notion.skippedReason().isBlank()) {
+                return new NotionPublish("skipped", blankToEmpty(notion.pageId()), notion.skippedReason());
+            }
+            String error = notion.error() != null && notion.error().code() != null
+                    ? notion.error().code()
+                    : "failed";
+            return new NotionPublish("failed", blankToEmpty(notion.pageId()), error);
+        }
+
+        private static String blankToEmpty(String value) {
+            return value == null ? "" : value;
         }
     }
 }

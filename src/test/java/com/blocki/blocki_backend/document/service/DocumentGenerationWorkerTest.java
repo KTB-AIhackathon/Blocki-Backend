@@ -56,17 +56,26 @@ class DocumentGenerationWorkerTest {
         DocumentGenerationJob job = job();
         job.start(NOW);
         when(claimService.claimDueQueuedJobs(NOW)).thenReturn(List.of(job));
-        when(client.generate(any())).thenReturn(new DocumentGenerationClient.Result(
-                true, "proposed", "# 내용", List.of(), null));
+        DocumentGenerationClient.Result result = new DocumentGenerationClient.Result(
+                true, "proposed", "# 내용", List.of(), null);
+        when(client.generate(any())).thenReturn(result);
         Mockito.doThrow(new IllegalStateException("No active transaction"))
                 .when(completionService)
                 .complete(any(), any(), any(), anyBoolean());
+        DocumentPublishLogService publishLogService = Mockito.mock(DocumentPublishLogService.class);
 
-        worker(jobRepository, claimService, completionService, client).processQueuedJobs();
+        new DocumentGenerationWorker(
+                jobRepository,
+                claimService,
+                completionService,
+                client,
+                publishLogService,
+                Clock.fixed(NOW, ZoneOffset.UTC)).processQueuedJobs();
 
         assertThat(job.getStatus()).isEqualTo(DocumentGenerationJobStatus.QUEUED);
         assertThat(job.getAttempt()).isEqualTo(2);
         verify(jobRepository).save(job);
+        verify(publishLogService).record(job, result, false);
     }
 
     @Test

@@ -27,6 +27,7 @@ public class DocumentGenerationWorker {
     private final DocumentGenerationClaimService claimService;
     private final DocumentGenerationCompletionService completionService;
     private final DocumentGenerationClient client;
+    private final DocumentPublishLogService publishLogService;
     private final Clock clock;
 
     // The second constructor exists only so tests can hold time still. Without
@@ -36,8 +37,9 @@ public class DocumentGenerationWorker {
             DocumentGenerationJobRepository jobRepository,
             DocumentGenerationClaimService claimService,
             DocumentGenerationCompletionService completionService,
-            DocumentGenerationClient client) {
-        this(jobRepository, claimService, completionService, client, Clock.systemUTC());
+            DocumentGenerationClient client,
+            DocumentPublishLogService publishLogService) {
+        this(jobRepository, claimService, completionService, client, publishLogService, Clock.systemUTC());
     }
 
     DocumentGenerationWorker(
@@ -46,10 +48,21 @@ public class DocumentGenerationWorker {
             DocumentGenerationCompletionService completionService,
             DocumentGenerationClient client,
             Clock clock) {
+        this(jobRepository, claimService, completionService, client, null, clock);
+    }
+
+    DocumentGenerationWorker(
+            DocumentGenerationJobRepository jobRepository,
+            DocumentGenerationClaimService claimService,
+            DocumentGenerationCompletionService completionService,
+            DocumentGenerationClient client,
+            DocumentPublishLogService publishLogService,
+            Clock clock) {
         this.jobRepository = jobRepository;
         this.claimService = claimService;
         this.completionService = completionService;
         this.client = client;
+        this.publishLogService = publishLogService;
         this.clock = clock;
     }
 
@@ -89,8 +102,11 @@ public class DocumentGenerationWorker {
                 return;
             }
             String missingSources = String.join(",", result.missingSources());
+            DocumentGenerationClient.NotionPublish notion = result.notion() == null
+                    ? DocumentGenerationClient.NotionPublish.none()
+                    : result.notion();
             log.info(
-                    "document job ok uuid={} ts={} userId={} type={} status={} markdownChars={} missing={} attempt={}/{} ms={}",
+                    "document job ok uuid={} ts={} userId={} type={} status={} markdownChars={} missing={} notion={} page={} notionDetail={} attempt={}/{} ms={}",
                     job.getId(),
                     clock.instant(),
                     job.getUserId(),
@@ -98,6 +114,9 @@ public class DocumentGenerationWorker {
                     result.status(),
                     markdownChars,
                     missingSources,
+                    notion.status(),
+                    shortId(notion.pageId()),
+                    notion.detail().isBlank() ? "-" : notion.detail(),
                     job.getAttempt(),
                     job.getMaxAttempts(),
                     elapsedMs(started));
@@ -107,6 +126,7 @@ public class DocumentGenerationWorker {
                         new GeneratedDocument(title(job), result.markdown()),
                         missingSources,
                         "partial".equals(result.status()));
+                recordNotion(job, result, true);
             } catch (RuntimeException exception) {
                 log.error(
                         "document job persist uuid={} ts={} userId={} type={} attempt={}/{} ms={}",
@@ -118,6 +138,7 @@ public class DocumentGenerationWorker {
                         job.getMaxAttempts(),
                         elapsedMs(started),
                         exception);
+                recordNotion(job, result, false);
                 retryOrFail(job, "AI_PIPELINE_FAILED");
             }
         } catch (InternalAiClientException exception) {
@@ -210,5 +231,31 @@ public class DocumentGenerationWorker {
 
     private static String title(DocumentGenerationJob job) {
         return job.getDocumentType().name().equals("RESUME") ? "이력서" : "포트폴리오";
+    }
+
+    private void recordNotion(
+            DocumentGenerationJob job, DocumentGenerationClient.Result result, boolean documentPersisted) {
+        if (publishLogService == null) {
+            return;
+        }
+        try {
+            publishLogService.record(job, result, documentPersisted);
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "document notion log failed uuid={} ts={} userId={} persisted={}",
+                    job.getId(),
+                    clock.instant(),
+                    job.getUserId(),
+                    documentPersisted,
+                    exception);
+        }
+    }
+
+    private static String shortId(String value) {
+        if (value == null || value.isBlank()) {
+            return "-";
+        }
+        String compact = value.replace("-", "");
+        return compact.length() <= 8 ? compact : compact.substring(compact.length() - 8);
     }
 }

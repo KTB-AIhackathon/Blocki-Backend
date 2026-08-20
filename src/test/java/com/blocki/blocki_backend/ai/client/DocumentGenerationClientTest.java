@@ -198,6 +198,20 @@ class DocumentGenerationClientTest {
     }
 
     @Test
+    void keeps_notion_skip_from_the_ai_response() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(withSuccess("""
+                        { "ok": true, "status": "partial", "artifact": { "kind": "resume", "title": "이력서", "body_markdown": "# 문서" }, "missing_sources": [], "notion": { "ok": false, "page_id": null, "skipped_reason": "parent unreadable (404)" } }
+                        """, APPLICATION_JSON));
+
+        DocumentGenerationClient.Result result = client.generate(job());
+
+        assertThat(result.ok()).isTrue();
+        assertThat(result.notion().status()).isEqualTo("skipped");
+        assertThat(result.notion().detail()).isEqualTo("parent unreadable (404)");
+    }
+
+    @Test
     void returns_partial_without_inventing_a_missing_source() {
         server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
                 .andRespond(withSuccess("""
