@@ -67,8 +67,10 @@ public class DocumentGenerationWorker {
             int markdownChars = result.markdown() == null ? 0 : result.markdown().length();
             if (!result.ok() || result.markdown() == null || result.markdown().isBlank()) {
                 log.warn(
-                        "document job failed jobId={} type={} httpBodyOk={} status={} errorCode={} markdownChars={} attempt={}/{} ms={}",
+                        "document job failed uuid={} ts={} userId={} type={} httpBodyOk={} status={} errorCode={} markdownChars={} attempt={}/{} ms={}",
                         job.getId(),
+                        clock.instant(),
+                        job.getUserId(),
                         job.getDocumentType(),
                         result.ok(),
                         result.status(),
@@ -82,8 +84,10 @@ public class DocumentGenerationWorker {
             }
             String missingSources = String.join(",", result.missingSources());
             log.info(
-                    "document job ok jobId={} type={} status={} markdownChars={} missing={} attempt={}/{} ms={}",
+                    "document job ok uuid={} ts={} userId={} type={} status={} markdownChars={} missing={} attempt={}/{} ms={}",
                     job.getId(),
+                    clock.instant(),
+                    job.getUserId(),
                     job.getDocumentType(),
                     result.status(),
                     markdownChars,
@@ -94,8 +98,10 @@ public class DocumentGenerationWorker {
             completionService.complete(job, new GeneratedDocument(title(job), result.markdown()), missingSources);
         } catch (InternalAiClientException exception) {
             log.warn(
-                    "document job transport jobId={} type={} category={} retryable={} attempt={}/{} ms={} cause={}",
+                    "document job transport uuid={} ts={} userId={} type={} category={} retryable={} attempt={}/{} ms={} cause={}",
                     job.getId(),
+                    clock.instant(),
+                    job.getUserId(),
                     job.getDocumentType(),
                     exception.getCategory(),
                     exception.isRetryable(),
@@ -110,8 +116,10 @@ public class DocumentGenerationWorker {
             }
         } catch (RestClientException exception) {
             log.warn(
-                    "document job rest jobId={} type={} attempt={}/{} ms={}",
+                    "document job rest uuid={} ts={} userId={} type={} attempt={}/{} ms={}",
                     job.getId(),
+                    clock.instant(),
+                    job.getUserId(),
                     job.getDocumentType(),
                     job.getAttempt(),
                     job.getMaxAttempts(),
@@ -120,8 +128,10 @@ public class DocumentGenerationWorker {
             retryOrFail(job, "AI_PIPELINE_FAILED");
         } catch (IllegalArgumentException exception) {
             log.warn(
-                    "document job invalid jobId={} type={} attempt={}/{} ms={}",
+                    "document job invalid uuid={} ts={} userId={} type={} attempt={}/{} ms={}",
                     job.getId(),
+                    clock.instant(),
+                    job.getUserId(),
                     job.getDocumentType(),
                     job.getAttempt(),
                     job.getMaxAttempts(),
@@ -134,8 +144,10 @@ public class DocumentGenerationWorker {
     private void retryOrFail(DocumentGenerationJob job, String errorCode) {
         if (job.getAttempt() >= job.getMaxAttempts()) {
             log.warn(
-                    "document job exhausted jobId={} type={} attempt={}/{} errorCode={}",
+                    "document job exhausted uuid={} ts={} userId={} type={} attempt={}/{} errorCode={}",
                     job.getId(),
+                    clock.instant(),
+                    job.getUserId(),
                     job.getDocumentType(),
                     job.getAttempt(),
                     job.getMaxAttempts(),
@@ -145,8 +157,10 @@ public class DocumentGenerationWorker {
         }
         Duration delay = job.getAttempt() == 1 ? Duration.ofSeconds(30) : Duration.ofMinutes(2);
         log.warn(
-                "document job retry jobId={} type={} attempt={}/{} delaySec={} errorCode={}",
+                "document job retry uuid={} ts={} userId={} type={} attempt={}/{} delaySec={} errorCode={}",
                 job.getId(),
+                clock.instant(),
+                job.getUserId(),
                 job.getDocumentType(),
                 job.getAttempt(),
                 job.getMaxAttempts(),

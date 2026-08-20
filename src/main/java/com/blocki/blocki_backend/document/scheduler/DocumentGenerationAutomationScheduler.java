@@ -3,8 +3,10 @@ package com.blocki.blocki_backend.document.scheduler;
 import com.blocki.blocki_backend.document.entity.DocumentType;
 import com.blocki.blocki_backend.document.service.DocumentGenerationAutomationService;
 import com.blocki.blocki_backend.document.service.DocumentGenerationException;
+import com.blocki.blocki_backend.document.service.DocumentGenerationResult;
 import com.blocki.blocki_backend.document.service.DocumentGenerationService;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -51,14 +53,18 @@ public class DocumentGenerationAutomationScheduler {
                 scheduledAt.getDayOfWeek(), scheduledAt.toLocalTime());
         if (!userIds.isEmpty()) {
             log.info(
-                    "Scheduled document generation tick users={} day={} time={}",
+                    "Scheduled document generation tick uuid=- ts={} users={} day={} time={}",
+                    clock.instant(),
                     userIds.size(),
                     scheduledAt.getDayOfWeek(),
                     scheduledAt.toLocalTime());
         }
         for (UUID userId : userIds) {
             if (!automationService.isGithubConnected(userId)) {
-                log.warn("Scheduled document generation disabled; GitHub disconnected userId={}", userId);
+                log.warn(
+                        "Scheduled document generation disabled uuid=- ts={} userId={} reason=github_disconnected",
+                        clock.instant(),
+                        userId);
                 automationService.disableForGithubDisconnect(userId);
                 continue;
             }
@@ -69,17 +75,37 @@ public class DocumentGenerationAutomationScheduler {
 
     private void request(UUID userId, DocumentType documentType, LocalDate scheduledDate) {
         String idempotencyKey = "document-generation-automation:" + scheduledDate + ":" + documentType.name();
+        Instant ts = clock.instant();
         try {
-            documentGenerationService.request(userId, documentType, idempotencyKey);
-            log.info("Scheduled document generation queued userId={} type={}", userId, documentType);
+            DocumentGenerationResult queued = documentGenerationService.request(userId, documentType, idempotencyKey);
+            log.info(
+                    "Scheduled document generation queued uuid={} ts={} userId={} type={}",
+                    queued == null ? "-" : queued.id(),
+                    ts,
+                    userId,
+                    documentType);
         } catch (DocumentGenerationException exception) {
             if (DocumentGenerationException.JOB_ALREADY_RUNNING.equals(exception.getCode())) {
-                log.info("Scheduled document generation skipped for userId={}, type={}", userId, documentType);
+                log.info(
+                        "Scheduled document generation skipped uuid=- ts={} userId={} type={}",
+                        ts,
+                        userId,
+                        documentType);
                 return;
             }
-            log.error("Scheduled document generation could not be queued for userId={}, type={}", userId, documentType, exception);
+            log.error(
+                    "Scheduled document generation could not be queued uuid=- ts={} userId={} type={}",
+                    ts,
+                    userId,
+                    documentType,
+                    exception);
         } catch (RuntimeException exception) {
-            log.error("Scheduled document generation could not be queued for userId={}, type={}", userId, documentType, exception);
+            log.error(
+                    "Scheduled document generation could not be queued uuid=- ts={} userId={} type={}",
+                    ts,
+                    userId,
+                    documentType,
+                    exception);
         }
     }
 }
