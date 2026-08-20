@@ -1,6 +1,7 @@
 package com.blocki.blocki_backend.ai.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpHeaders.CONTENT_TYPE;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
@@ -23,8 +24,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.json.JsonMapper;
 
 class DocumentGenerationClientTest {
 
@@ -39,7 +42,8 @@ class DocumentGenerationClientTest {
         server = MockRestServiceServer.bindTo(builder).build();
         AiProperties properties = new AiProperties();
         properties.setInternalKey("internal-key");
-        client = new DocumentGenerationClient(builder.build(), properties, integrationTokenProvider, userRepository);
+        client = new DocumentGenerationClient(
+                builder.build(), properties, integrationTokenProvider, userRepository, new JsonMapper());
     }
 
     @Test
@@ -75,12 +79,108 @@ class DocumentGenerationClientTest {
                         }
                         """.formatted(jobId, userId)))
                 .andRespond(withSuccess("""
-                        { "ok": true, "status": "proposed", "artifact": { "body_markdown": "# 문서" }, "missing_sources": [] }
+                        { "ok": true, "status": "proposed", "artifact": { "kind": "resume", "title": "이력서", "body_markdown": "# 문서" }, "missing_sources": [] }
                         """, APPLICATION_JSON));
 
         DocumentGenerationClient.Result result = client.generate(job);
 
         assertThat(result.markdown()).isEqualTo("# 문서");
         server.verify();
+    }
+
+    @Test
+    void rejects_an_unexpected_success_status() {
+        DocumentGenerationJob job = job();
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(withSuccess("""
+                        { "ok": true, "status": "pending", "artifact": { "kind": "resume", "title": "이력서", "body_markdown": "# 문서" } }
+                        """, APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.generate(job))
+                .isInstanceOf(InternalAiClientException.class)
+                .extracting(exception -> ((InternalAiClientException) exception).getCategory())
+                .isEqualTo(InternalAiClientException.Category.INVALID_RESPONSE);
+    }
+
+    @Test
+    void rejects_a_success_response_without_markdown_artifact() {
+        DocumentGenerationJob job = job();
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(withSuccess("""
+                        { "ok": true, "status": "proposed", "artifact": {} }
+                        """, APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.generate(job))
+                .isInstanceOf(InternalAiClientException.class)
+                .extracting(exception -> ((InternalAiClientException) exception).getCategory())
+                .isEqualTo(InternalAiClientException.Category.INVALID_RESPONSE);
+    }
+
+    @Test
+    void rejects_malformed_json_response_as_invalid_response() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(withSuccess("{", APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.generate(job()))
+                .isInstanceOf(InternalAiClientException.class)
+                .extracting(exception -> ((InternalAiClientException) exception).getCategory())
+                .isEqualTo(InternalAiClientException.Category.INVALID_RESPONSE);
+    }
+
+    @Test
+    void returns_partial_result_with_missing_github_source() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(withSuccess("""
+                        { "ok": true, "status": "partial", "artifact": { "kind": "resume", "title": "이력서", "body_markdown": "# 문서" }, "missing_sources": ["GITHUB"] }
+                        """, APPLICATION_JSON));
+
+        DocumentGenerationClient.Result result = client.generate(job());
+
+        assertThat(result.status()).isEqualTo("partial");
+        assertThat(result.missingSources()).containsExactly("GITHUB");
+    }
+
+    @Test
+    void classifies_unauthorized_response_as_permanent_failure() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withStatus(HttpStatus.UNAUTHORIZED));
+
+        assertThatThrownBy(() -> client.generate(job()))
+                .isInstanceOf(InternalAiClientException.class)
+                .extracting(exception -> ((InternalAiClientException) exception).getCategory())
+                .isEqualTo(InternalAiClientException.Category.UNAUTHORIZED);
+    }
+
+    @Test
+    void classifies_other_4xx_responses_as_permanent_failure() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withStatus(HttpStatus.BAD_REQUEST));
+
+        assertThatThrownBy(() -> client.generate(job()))
+                .isInstanceOf(InternalAiClientException.class)
+                .extracting(exception -> ((InternalAiClientException) exception).getCategory())
+                .isEqualTo(InternalAiClientException.Category.CLIENT_ERROR);
+    }
+
+    @Test
+    void classifies_5xx_response_as_retryable_failure() {
+        server.expect(requestTo("https://ai.blocki.example/internal/jobs"))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withStatus(HttpStatus.BAD_GATEWAY));
+
+        assertThatThrownBy(() -> client.generate(job()))
+                .isInstanceOf(InternalAiClientException.class)
+                .extracting(exception -> ((InternalAiClientException) exception).getCategory())
+                .isEqualTo(InternalAiClientException.Category.SERVER_ERROR);
+    }
+
+    private DocumentGenerationJob job() {
+        UUID userId = UUID.randomUUID();
+        DocumentGenerationJob job = Mockito.mock(DocumentGenerationJob.class);
+        when(job.getId()).thenReturn(UUID.randomUUID());
+        when(job.getUserId()).thenReturn(userId);
+        when(job.getDocumentType()).thenReturn(DocumentType.RESUME);
+        when(integrationTokenProvider.findAccessToken(userId, IntegrationProvider.GITHUB)).thenReturn(Optional.empty());
+        when(userRepository.findById(userId)).thenReturn(Optional.of(User.register("hash", "김블로", "blocki@example.com")));
+        return job;
     }
 }

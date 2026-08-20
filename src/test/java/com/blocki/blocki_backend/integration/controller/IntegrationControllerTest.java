@@ -2,13 +2,16 @@ package com.blocki.blocki_backend.integration.controller;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.blocki.blocki_backend.integration.entity.IntegrationProvider;
 import com.blocki.blocki_backend.integration.entity.IntegrationStatus;
+import com.blocki.blocki_backend.integration.config.FrontendProperties;
 import com.blocki.blocki_backend.integration.service.IntegrationResult;
 import com.blocki.blocki_backend.integration.service.IntegrationService;
 import java.net.URI;
@@ -25,11 +28,13 @@ class IntegrationControllerTest {
     private final IntegrationService integrationService = org.mockito.Mockito.mock(IntegrationService.class);
     private final CurrentUserIdResolver currentUserIdResolver = org.mockito.Mockito.mock(CurrentUserIdResolver.class);
     private final UUID userId = UUID.randomUUID();
+    private final FrontendProperties frontendProperties = new FrontendProperties();
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new IntegrationController(integrationService, currentUserIdResolver)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(new IntegrationController(
+                integrationService, currentUserIdResolver, frontendProperties)).build();
         when(currentUserIdResolver.resolve()).thenReturn(userId);
     }
 
@@ -61,26 +66,53 @@ class IntegrationControllerTest {
     }
 
     @Test
-    void redirects_successful_callback_to_workspace() throws Exception {
+    void returns_an_authorize_url_for_the_authenticated_user() throws Exception {
+        URI authorizeUri = URI.create("https://github.com/login/oauth/authorize?client_id=client-id&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback&state=opaque-state");
+        when(integrationService.startAuthorization(userId, IntegrationProvider.GITHUB)).thenReturn(authorizeUri);
+
+        mockMvc.perform(post("/api/v1/integrations/github/authorize-url"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.authorizeUrl").value(authorizeUri.toString()));
+
+        verify(integrationService).startAuthorization(userId, IntegrationProvider.GITHUB);
+    }
+
+    @Test
+    void redirects_successful_callback_to_the_frontend_callback_page() throws Exception {
         mockMvc.perform(get("/api/v1/integrations/notion/callback")
                         .queryParam("code", "authorization-code")
                         .queryParam("state", "opaque-state"))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", "/workspace?integration=notion&result=success"));
+                .andExpect(header().string("Location", "http://localhost:5173/oauth/callback?provider=notion&result=success"));
 
         verify(integrationService).completeAuthorization(
                 IntegrationProvider.NOTION, "authorization-code", "opaque-state");
     }
 
     @Test
-    void redirects_github_callback_to_workspace() throws Exception {
+    void redirects_a_provider_denial_to_the_frontend_callback_page() throws Exception {
         mockMvc.perform(get("/api/v1/integrations/github/callback")
-                        .queryParam("code", "authorization-code")
+                        .queryParam("error", "access_denied")
                         .queryParam("state", "opaque-state"))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", "/workspace?integration=github&result=success"));
+                .andExpect(header().string(
+                        "Location",
+                        "http://localhost:5173/oauth/callback?provider=github&result=failed&error=OAUTH_AUTHORIZATION_DENIED"));
 
-        verify(integrationService).completeAuthorization(
-                IntegrationProvider.GITHUB, "authorization-code", "opaque-state");
+        verify(integrationService).cancelAuthorization(IntegrationProvider.GITHUB, "opaque-state");
+    }
+
+    @Test
+    void disconnects_the_authenticated_users_provider() throws Exception {
+        when(integrationService.disconnect(userId, IntegrationProvider.GITHUB)).thenReturn(
+                new IntegrationResult(IntegrationProvider.GITHUB, IntegrationStatus.NOT_CONNECTED, null, null, null));
+
+        mockMvc.perform(delete("/api/v1/integrations/github"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.provider").value("GITHUB"))
+                .andExpect(jsonPath("$.data.status").value("NOT_CONNECTED"))
+                .andExpect(jsonPath("$.data.accountLabel").doesNotExist());
+
+        verify(integrationService).disconnect(userId, IntegrationProvider.GITHUB);
     }
 }

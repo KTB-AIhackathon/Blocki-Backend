@@ -1,6 +1,7 @@
 package com.blocki.blocki_backend.document.service;
 
 import com.blocki.blocki_backend.ai.client.DocumentGenerationClient;
+import com.blocki.blocki_backend.ai.client.InternalAiClientException;
 import com.blocki.blocki_backend.document.entity.DocumentGenerationJob;
 import com.blocki.blocki_backend.document.entity.DocumentGenerationJobStatus;
 import com.blocki.blocki_backend.document.repository.DocumentGenerationJobRepository;
@@ -12,7 +13,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
 
 @Service
 @ConditionalOnBean(DocumentGenerationClient.class)
@@ -56,15 +56,14 @@ public class DocumentGenerationWorker {
         Instant now = clock.instant();
         try {
             DocumentGenerationClient.Result result = client.generate(job);
-            if (!result.ok() || "no_change".equals(result.status())
-                    || result.markdown() == null || result.markdown().isBlank()) {
+            if (!result.ok() || result.markdown() == null || result.markdown().isBlank()) {
                 fail(job, result.errorCode() == null ? "AI_PIPELINE_FAILED" : result.errorCode(), false);
                 return;
             }
             String missingSources = String.join(",", result.missingSources());
             completionService.complete(job, new GeneratedDocument(title(job), result.markdown()), missingSources);
-        } catch (RestClientResponseException exception) {
-            if (exception.getStatusCode().is5xxServerError()) {
+        } catch (InternalAiClientException exception) {
+            if (exception.isRetryable()) {
                 retryOrFail(job, "AI_PIPELINE_FAILED");
             } else {
                 fail(job, "AI_PIPELINE_FAILED", false);

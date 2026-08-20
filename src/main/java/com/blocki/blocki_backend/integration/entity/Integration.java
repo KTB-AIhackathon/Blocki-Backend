@@ -86,6 +86,15 @@ public class Integration {
         this.errorCode = errorCode;
     }
 
+    public void disconnect() {
+        this.encryptedAccessToken = null;
+        this.encryptedRefreshToken = null;
+        this.accountLabel = null;
+        this.connectedAt = null;
+        this.status = IntegrationStatus.NOT_CONNECTED;
+        this.errorCode = null;
+    }
+
     public IntegrationProvider getProvider() {
         return provider;
     }

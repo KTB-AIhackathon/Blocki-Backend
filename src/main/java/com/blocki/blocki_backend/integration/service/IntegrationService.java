@@ -139,6 +139,17 @@ public class IntegrationService implements IntegrationTokenProvider {
                 .toList();
     }
 
+    @Transactional
+    public IntegrationResult disconnect(UUID userId, IntegrationProvider provider) {
+        return integrationRepository.findByUserIdAndProvider(userId, provider)
+                .map(integration -> {
+                    integration.disconnect();
+                    integrationRepository.save(integration);
+                    return toResult(integration);
+                })
+                .orElseGet(() -> notConnected(provider));
+    }
+
     @Override
     @Transactional(readOnly = true)
     public Optional<String> findAccessToken(UUID userId, IntegrationProvider provider) {

@@ -311,6 +311,44 @@ class IntegrationServiceTest {
     }
 
     @Test
+    void disconnects_a_connected_provider_and_removes_its_tokens() {
+        UUID userId = UUID.randomUUID();
+        Integration integration = Integration.connecting(userId, IntegrationProvider.NOTION);
+        integration.complete("encrypted-access-token", "encrypted-refresh-token", "Blocki Workspace", NOW);
+        when(integrationRepository.findByUserIdAndProvider(userId, IntegrationProvider.NOTION))
+                .thenReturn(Optional.of(integration));
+
+        IntegrationResult result = service.disconnect(userId, IntegrationProvider.NOTION);
+
+        assertThat(result).isEqualTo(new IntegrationResult(
+                IntegrationProvider.NOTION,
+                IntegrationStatus.NOT_CONNECTED,
+                null,
+                null,
+                null));
+        assertThat(integration.getEncryptedAccessToken()).isNull();
+        assertThat(integration.getEncryptedRefreshToken()).isNull();
+        verify(integrationRepository).save(integration);
+    }
+
+    @Test
+    void disconnecting_an_absent_provider_returns_not_connected() {
+        UUID userId = UUID.randomUUID();
+        when(integrationRepository.findByUserIdAndProvider(userId, IntegrationProvider.GITHUB))
+                .thenReturn(Optional.empty());
+
+        IntegrationResult result = service.disconnect(userId, IntegrationProvider.GITHUB);
+
+        assertThat(result).isEqualTo(new IntegrationResult(
+                IntegrationProvider.GITHUB,
+                IntegrationStatus.NOT_CONNECTED,
+                null,
+                null,
+                null));
+        verify(integrationRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void marks_a_cancelled_provider_authorization_as_an_error_after_consuming_its_state() {
         UUID userId = UUID.randomUUID();
         String rawState = "cancelled-state";
